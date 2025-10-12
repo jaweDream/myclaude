@@ -32,7 +32,7 @@
         "specifications"
       ],
       "category": "workflows",
-      "strict": true,
+      "strict": false,
       "commands": [
         "./commands/requirements-pilot.md"
       ],
@@ -66,7 +66,7 @@
         "workflow-orchestration"
       ],
       "category": "workflows",
-      "strict": true,
+      "strict": false,
       "commands": [
         "./commands/bmad-pilot.md"
       ],
@@ -106,7 +106,7 @@
         "documentation"
       ],
       "category": "essentials",
-      "strict": true,
+      "strict": false,
       "commands": [
         "./commands/code.md",
         "./commands/debug.md",
@@ -148,7 +148,7 @@
         "deep-research"
       ],
       "category": "advanced",
-      "strict": true,
+      "strict": false,
       "commands": [],
       "agents": [
         "./agents/gpt5.md"
