@@ -59,16 +59,7 @@ graph LR
 
 ```bash
 # List available plugins
-/plugin list
-
-# Install specific workflow plugins
-/plugin install bmad-agile-workflow         # BMAD methodology
-/plugin install requirements-driven-development  # Requirements workflow
-/plugin install development-essentials      # Core dev commands
-/plugin install advanced-ai-agents         # GPT-5 integration
-
-# View plugin details
-/plugin info bmad-agile-workflow
+/plugin github.com/cexll/myclaude
 ```
 
 #### Method 2: Traditional Installation
