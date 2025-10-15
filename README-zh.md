@@ -58,17 +58,7 @@ graph LR
 #### 方法1：插件系统（推荐）🎯
 
 ```bash
-# 列出所有可用插件
-/plugin list
-
-# 安装特定工作流插件
-/plugin install bmad-agile-workflow         # BMAD 方法论
-/plugin install requirements-driven-development  # Requirements 工作流
-/plugin install development-essentials      # 核心开发命令
-/plugin install advanced-ai-agents         # GPT-5 集成
-
-# 查看插件详情
-/plugin info bmad-agile-workflow
+/plugin github.com/cexll/myclaude
 ```
 
 #### 方法2：传统安装
