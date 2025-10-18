@@ -5,10 +5,10 @@
   "version": "1.0.0",
   "author": {
     "name": "Claude Code Dev Workflows",
-    "url": "https://github.com/yourusername/myclaude"
+    "url": "https://github.com/cexll/myclaude"
   },
-  "homepage": "https://github.com/yourusername/myclaude",
-  "repository": "https://github.com/yourusername/myclaude",
+  "homepage": "https://github.com/cexll/myclaude",
+  "repository": "https://github.com/cexll/myclaude",
   "license": "MIT",
   "keywords": [
     "requirements",
