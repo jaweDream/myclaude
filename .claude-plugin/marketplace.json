@@ -3,7 +3,7 @@
   "owner": {
     "name": "Claude Code Dev Workflows",
     "email": "contact@example.com",
-    "url": "https://github.com/yourusername/myclaude"
+    "url": "https://github.com/cexll/myclaude"
   },
   "metadata": {
     "description": "Professional multi-agent development workflows with Requirements-Driven and BMAD methodologies, featuring 16+ specialized agents and 12+ commands",
@@ -17,10 +17,10 @@
       "version": "1.0.0",
       "author": {
         "name": "Claude Code Dev Workflows",
-        "url": "https://github.com/yourusername/myclaude"
+        "url": "https://github.com/cexll/myclaude"
       },
-      "homepage": "https://github.com/yourusername/myclaude",
-      "repository": "https://github.com/yourusername/myclaude",
+      "homepage": "https://github.com/cexll/myclaude",
+      "repository": "https://github.com/cexll/myclaude",
       "license": "MIT",
       "keywords": [
         "requirements",
@@ -50,10 +50,10 @@
       "version": "1.0.0",
       "author": {
         "name": "Claude Code Dev Workflows",
-        "url": "https://github.com/yourusername/myclaude"
+        "url": "https://github.com/cexll/myclaude"
       },
-      "homepage": "https://github.com/yourusername/myclaude",
-      "repository": "https://github.com/yourusername/myclaude",
+      "homepage": "https://github.com/cexll/myclaude",
+      "repository": "https://github.com/cexll/myclaude",
       "license": "MIT",
       "keywords": [
         "bmad",
@@ -87,10 +87,10 @@
       "version": "1.0.0",
       "author": {
         "name": "Claude Code Dev Workflows",
-        "url": "https://github.com/yourusername/myclaude"
+        "url": "https://github.com/cexll/myclaude"
       },
-      "homepage": "https://github.com/yourusername/myclaude",
-      "repository": "https://github.com/yourusername/myclaude",
+      "homepage": "https://github.com/cexll/myclaude",
+      "repository": "https://github.com/cexll/myclaude",
       "license": "MIT",
       "keywords": [
         "code",
@@ -120,9 +120,8 @@
         "./agents/code.md",
         "./agents/bugfix.md",
         "./agents/bugfix-verify.md",
-        "./agents/code-optimize.md",
-        "./agents/debug.md",
-        "./agents/develop.md"
+        "./agents/optimize.md",
+        "./agents/debug.md"
       ]
     },
     {
@@ -132,10 +131,10 @@
       "version": "1.0.0",
       "author": {
         "name": "Claude Code Dev Workflows",
-        "url": "https://github.com/yourusername/myclaude"
+        "url": "https://github.com/cexll/myclaude"
       },
-      "homepage": "https://github.com/yourusername/myclaude",
-      "repository": "https://github.com/yourusername/myclaude",
+      "homepage": "https://github.com/cexll/myclaude",
+      "repository": "https://github.com/cexll/myclaude",
       "license": "MIT",
       "keywords": [
         "gpt5",
