@@ -38,7 +38,7 @@ The skill activates when Claude detects:
 ### Clarification Process
 
 ```
-User: "我要做一个用户登录功能"
+User: "I want to implement a user login feature"
   ↓
 Claude detects vague requirement
   ↓
@@ -67,10 +67,10 @@ Generate PRD files:
 
 | Dimension | Points | Criteria |
 |-----------|--------|----------|
-| **功能清晰度** (Functional Clarity) | 30 | Clear inputs/outputs (10), User interaction (10), Success criteria (10) |
-| **技术具体性** (Technical Specificity) | 25 | Tech stack (8), Integration points (8), Constraints (9) |
-| **实现完整性** (Implementation Completeness) | 25 | Edge cases (8), Error handling (9), Data validation (8) |
-| **业务背景** (Business Context) | 20 | Problem statement (7), Target users (7), Success metrics (6) |
+| **Functional Clarity** | 30 | Clear inputs/outputs (10), User interaction (10), Success criteria (10) |
+| **Technical Specificity** | 25 | Tech stack (8), Integration points (8), Constraints (9) |
+| **Implementation Completeness** | 25 | Edge cases (8), Error handling (9), Data validation (8) |
+| **Business Context** | 20 | Problem statement (7), Target users (7), Success metrics (6) |
 
 **Threshold**: ≥ 90 points required before PRD generation
 
@@ -90,26 +90,26 @@ Documents the entire clarification conversation:
 
 Structured PRD with four main sections:
 
-#### 需求描述 (Requirements Description)
-- 背景 (Background): Business problem, target users, value proposition
-- 功能概述 (Feature Overview): Core functionality, boundaries, user scenarios
-- 详细需求 (Detailed Requirements): Inputs/outputs, interactions, data, edge cases
+#### Requirements Description
+- Background: Business problem, target users, value proposition
+- Feature Overview: Core functionality, boundaries, user scenarios
+- Detailed Requirements: Inputs/outputs, interactions, data, edge cases
 
-#### 设计决策 (Design Decisions)
-- 技术方案 (Technical Approach): Architecture, components, data storage, APIs
-- 约束条件 (Constraints): Performance, compatibility, security, scalability
-- 风险评估 (Risk Assessment): Technical, dependency, timeline risks
+#### Design Decisions
+- Technical Approach: Architecture, components, data storage, APIs
+- Constraints: Performance, compatibility, security, scalability
+- Risk Assessment: Technical, dependency, timeline risks
 
-#### 验收标准 (Acceptance Criteria)
-- 功能验收 (Functional): Checklistable feature requirements
-- 质量标准 (Quality): Code quality, testing, performance, security
-- 用户验收 (User): UX, documentation, training
+#### Acceptance Criteria
+- Functional: Checklistable feature requirements
+- Quality Standards: Code quality, testing, performance, security
+- User Acceptance: UX, documentation, training
 
-#### 执行 Phase (Execution Phases)
-- Phase 1: 准备阶段 (Preparation) - Environment setup
-- Phase 2: 核心开发 (Core Development) - Core implementation
-- Phase 3: 集成测试 (Integration & Testing) - QA
-- Phase 4: 部署上线 (Deployment) - Release
+#### Execution Phases
+- Phase 1: Preparation - Environment setup
+- Phase 2: Core Development - Core implementation
+- Phase 3: Integration & Testing - QA
+- Phase 4: Deployment - Release
 
 ## Testing Guide
 
@@ -117,7 +117,7 @@ Structured PRD with four main sections:
 
 **Input**:
 ```
-"我要做一个用户登录功能"
+"I want to implement a user login feature"
 ```
 
 **Expected Behavior**:
@@ -259,7 +259,7 @@ The `/clarif` command in `development-essentials/commands/clarif.md` can coexist
 See full example in SKILL.md under "Example Clarification Flow"
 
 **Summary**:
-- Input: "我要做一个用户登录功能"
+- Input: "I want to implement a user login feature"
 - Round 1: Login method, scope, tech stack → Score 35→72
 - Round 2: Security, error handling, performance → Score 72→93
 - Output: Complete PRD with bcrypt, JWT, PostgreSQL, Go backend
@@ -306,5 +306,6 @@ PRD Generated:
 - Ported clarification logic from `/clarif` command
 - Added automatic activation triggers
 - Implemented 100-point scoring system
-- Created bilingual PRD template (需求描述/设计决策/验收标准/执行Phase)
+- Created structured PRD template with Requirements/Design/Acceptance/Execution sections
 - Added comprehensive test cases and examples
+- Translated to English for plugin compatibility

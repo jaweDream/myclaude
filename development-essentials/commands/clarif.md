@@ -22,31 +22,31 @@ Use targeted questioning to improve requirement quality. Continue until clarity 
 
 **Question Categories**:
 
-1. **功能范围 (Functional Scope)**
-   - 核心功能是什么? (What is the core functionality?)
-   - 边界条件是什么? (What are the boundary conditions?)
-   - 不包括哪些功能? (What is explicitly out of scope?)
+1. **Functional Scope**
+   - What is the core functionality?
+   - What are the boundary conditions?
+   - What is explicitly out of scope?
 
-2. **用户交互 (User Interaction)**
-   - 用户如何使用此功能? (How will users interact with this?)
-   - 输入和输出是什么? (What are the inputs and outputs?)
-   - 成功和失败的场景? (What are success/failure scenarios?)
+2. **User Interaction**
+   - How will users interact with this?
+   - What are the inputs and outputs?
+   - What are success/failure scenarios?
 
-3. **技术约束 (Technical Constraints)**
-   - 性能要求? (Performance requirements?)
-   - 兼容性要求? (Compatibility requirements?)
-   - 安全性考虑? (Security considerations?)
+3. **Technical Constraints**
+   - Performance requirements?
+   - Compatibility requirements?
+   - Security considerations?
 
-4. **业务价值 (Business Value)**
-   - 解决什么问题? (What problem does this solve?)
-   - 目标用户是谁? (Who are the target users?)
-   - 成功指标? (Success metrics?)
+4. **Business Value**
+   - What problem does this solve?
+   - Who are the target users?
+   - Success metrics?
 
 **Clarity Scoring (100-point system)**:
-- 功能清晰度 (Functional Clarity): 30 points
-- 技术具体性 (Technical Specificity): 25 points
-- 实现完整性 (Implementation Completeness): 25 points
-- 业务背景 (Business Context): 20 points
+- Functional Clarity: 30 points
+- Technical Specificity: 25 points
+- Implementation Completeness: 25 points
+- Business Context: 20 points
 
 ### Phase 3: PRD Generation
 Once clarity score ≥ 90, generate structured PRD document.
@@ -56,99 +56,99 @@ Once clarity score ≥ 90, generate structured PRD document.
 Generate `./.claude/specs/{feature_name}/prd.md` with the following structure:
 
 ```markdown
-# {Feature Name} - 产品需求文档 (PRD)
+# {Feature Name} - Product Requirements Document (PRD)
 
-## 需求描述 (Requirements Description)
+## Requirements Description
 
-### 背景 (Background)
-- 业务问题: [描述要解决的业务问题]
-- 目标用户: [目标用户群体]
-- 价值主张: [此功能带来的价值]
+### Background
+- Business Problem: [Describe the business problem to solve]
+- Target Users: [Target user groups]
+- Value Proposition: [Value this feature brings]
 
-### 功能概述 (Feature Overview)
-- 核心功能: [主要功能点列表]
-- 功能边界: [明确包含和不包含的内容]
-- 用户场景: [典型使用场景描述]
+### Feature Overview
+- Core Features: [List of main features]
+- Feature Boundaries: [What is and isn't included]
+- User Scenarios: [Typical usage scenarios]
 
-### 详细需求 (Detailed Requirements)
-- 输入/输出: [具体的输入输出规格]
-- 用户交互: [用户操作流程]
-- 数据要求: [数据结构和验证规则]
-- 边界条件: [边界情况处理]
+### Detailed Requirements
+- Input/Output: [Specific input/output specifications]
+- User Interaction: [User operation flow]
+- Data Requirements: [Data structures and validation rules]
+- Edge Cases: [Edge case handling]
 
-## 设计决策 (Design Decisions)
+## Design Decisions
 
-### 技术方案 (Technical Approach)
-- 架构选择: [技术架构决策及理由]
-- 关键组件: [主要技术组件列表]
-- 数据存储: [数据模型和存储方案]
-- 接口设计: [API/接口规格]
+### Technical Approach
+- Architecture Choice: [Technical architecture decisions and rationale]
+- Key Components: [List of main technical components]
+- Data Storage: [Data models and storage solutions]
+- Interface Design: [API/interface specifications]
 
-### 约束条件 (Constraints)
-- 性能要求: [响应时间、吞吐量等]
-- 兼容性: [系统兼容性要求]
-- 安全性: [安全相关考虑]
-- 可扩展性: [未来扩展考虑]
+### Constraints
+- Performance Requirements: [Response time, throughput, etc.]
+- Compatibility: [System compatibility requirements]
+- Security: [Security considerations]
+- Scalability: [Future expansion considerations]
 
-### 风险评估 (Risk Assessment)
-- 技术风险: [潜在技术风险及缓解方案]
-- 依赖风险: [外部依赖及备选方案]
-- 时间风险: [进度风险及应对策略]
+### Risk Assessment
+- Technical Risks: [Potential technical risks and mitigation plans]
+- Dependency Risks: [External dependencies and alternatives]
+- Schedule Risks: [Timeline risks and response strategies]
 
-## 验收标准 (Acceptance Criteria)
+## Acceptance Criteria
 
-### 功能验收 (Functional Acceptance)
-- [ ] 功能点1: [具体验收条件]
-- [ ] 功能点2: [具体验收条件]
-- [ ] 功能点3: [具体验收条件]
+### Functional Acceptance
+- [ ] Feature 1: [Specific acceptance conditions]
+- [ ] Feature 2: [Specific acceptance conditions]
+- [ ] Feature 3: [Specific acceptance conditions]
 
-### 质量标准 (Quality Standards)
-- [ ] 代码质量: [代码规范和审查要求]
-- [ ] 测试覆盖: [测试要求和覆盖率]
-- [ ] 性能指标: [性能测试通过标准]
-- [ ] 安全检查: [安全审查要求]
+### Quality Standards
+- [ ] Code Quality: [Code standards and review requirements]
+- [ ] Test Coverage: [Testing requirements and coverage]
+- [ ] Performance Metrics: [Performance test pass criteria]
+- [ ] Security Review: [Security review requirements]
 
-### 用户验收 (User Acceptance)
-- [ ] 用户体验: [UX验收标准]
-- [ ] 文档完整: [文档交付要求]
-- [ ] 培训材料: [如需要,培训材料要求]
+### User Acceptance
+- [ ] User Experience: [UX acceptance criteria]
+- [ ] Documentation: [Documentation delivery requirements]
+- [ ] Training Materials: [If needed, training material requirements]
 
-## 执行 Phase (Execution Phases)
+## Execution Phases
 
-### Phase 1: 准备阶段 (Preparation)
-**目标**: 环境准备和技术验证
-- [ ] 任务1: [具体任务描述]
-- [ ] 任务2: [具体任务描述]
-- **产出**: [阶段交付物]
-- **时间**: [预估时间]
+### Phase 1: Preparation
+**Goal**: Environment preparation and technical validation
+- [ ] Task 1: [Specific task description]
+- [ ] Task 2: [Specific task description]
+- **Deliverables**: [Phase deliverables]
+- **Time**: [Estimated time]
 
-### Phase 2: 核心开发 (Core Development)
-**目标**: 实现核心功能
-- [ ] 任务1: [具体任务描述]
-- [ ] 任务2: [具体任务描述]
-- **产出**: [阶段交付物]
-- **时间**: [预估时间]
+### Phase 2: Core Development
+**Goal**: Implement core functionality
+- [ ] Task 1: [Specific task description]
+- [ ] Task 2: [Specific task description]
+- **Deliverables**: [Phase deliverables]
+- **Time**: [Estimated time]
 
-### Phase 3: 集成测试 (Integration & Testing)
-**目标**: 集成和质量保证
-- [ ] 任务1: [具体任务描述]
-- [ ] 任务2: [具体任务描述]
-- **产出**: [阶段交付物]
-- **时间**: [预估时间]
+### Phase 3: Integration & Testing
+**Goal**: Integration and quality assurance
+- [ ] Task 1: [Specific task description]
+- [ ] Task 2: [Specific task description]
+- **Deliverables**: [Phase deliverables]
+- **Time**: [Estimated time]
 
-### Phase 4: 部署上线 (Deployment)
-**目标**: 发布和监控
-- [ ] 任务1: [具体任务描述]
-- [ ] 任务2: [具体任务描述]
-- **产出**: [阶段交付物]
-- **时间**: [预估时间]
+### Phase 4: Deployment
+**Goal**: Release and monitoring
+- [ ] Task 1: [Specific task description]
+- [ ] Task 2: [Specific task description]
+- **Deliverables**: [Phase deliverables]
+- **Time**: [Estimated time]
 
 ---
 
-**文档版本**: 1.0  
-**创建时间**: {timestamp}  
-**澄清轮数**: {clarification_rounds}  
-**质量评分**: {quality_score}/100
+**Document Version**: 1.0  
+**Created**: {timestamp}  
+**Clarification Rounds**: {clarification_rounds}  
+**Quality Score**: {quality_score}/100
 ```
 
 ## Success Criteria
@@ -164,5 +164,5 @@ Generate `./.claude/specs/{feature_name}/prd.md` with the following structure:
 - Don't proceed until quality threshold met
 - Keep questions focused and specific
 - Document all clarification rounds
-- Maintain Chinese section headers with English translations
+- Use clear, professional English throughout
 - Generate concrete, actionable specifications

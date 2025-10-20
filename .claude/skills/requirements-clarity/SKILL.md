@@ -77,22 +77,22 @@ Upon activation, this skill transforms vague requirements into actionable PRDs t
 
 **Assessment Rubric**:
 ```
-功能清晰度 (Functional Clarity): /30 points
+Functional Clarity: /30 points
 - Clear inputs/outputs: 10 pts
 - User interaction defined: 10 pts
 - Success criteria stated: 10 pts
 
-技术具体性 (Technical Specificity): /25 points
+Technical Specificity: /25 points
 - Technology stack mentioned: 8 pts
 - Integration points identified: 8 pts
 - Constraints specified: 9 pts
 
-实现完整性 (Implementation Completeness): /25 points
+Implementation Completeness: /25 points
 - Edge cases considered: 8 pts
 - Error handling mentioned: 9 pts
 - Data validation specified: 8 pts
 
-业务背景 (Business Context): /20 points
+Business Context: /20 points
 - Problem statement clear: 7 pts
 - Target users identified: 7 pts
 - Success metrics defined: 6 pts
@@ -100,42 +100,42 @@ Upon activation, this skill transforms vague requirements into actionable PRDs t
 
 **Initial Response Format**:
 ```markdown
-我已经理解您的需求。让我帮您完善这个需求规格。
+I understand your requirement. Let me help you refine this specification.
 
-**当前清晰度评分**: X/100
+**Current Clarity Score**: X/100
 
-**已明确的部分**:
+**Clear Aspects**:
 - [List what's clear]
 
-**需要澄清的部分**:
+**Needs Clarification**:
 - [List gaps]
 
-让我开始系统性地澄清这些内容...
+Let me systematically clarify these points...
 ```
 
 ### Step 2: Gap Analysis
 
 Identify missing information across four dimensions:
 
-**1. 功能范围 (Functional Scope)**
+**1. Functional Scope**
 - What is the core functionality?
 - What are the boundaries?
 - What is out of scope?
 - What are edge cases?
 
-**2. 用户交互 (User Interaction)**
+**2. User Interaction**
 - How do users interact?
 - What are the inputs?
 - What are the outputs?
 - What are success/failure scenarios?
 
-**3. 技术约束 (Technical Constraints)**
+**3. Technical Constraints**
 - Performance requirements?
 - Compatibility requirements?
 - Security considerations?
 - Scalability needs?
 
-**4. 业务价值 (Business Value)**
+**4. Business Value**
 - What problem does this solve?
 - Who are the target users?
 - What are success metrics?
@@ -152,16 +152,16 @@ Identify missing information across four dimensions:
 
 **Question Format**:
 ```markdown
-我需要澄清以下几点以完善需求文档:
+I need to clarify the following points to complete the requirements document:
 
 1. **[Category]**: [Specific question]?
-   - 例如: [Example if helpful]
+   - For example: [Example if helpful]
 
 2. **[Category]**: [Specific question]?
 
 3. **[Category]**: [Specific question]?
 
-请提供您的答案,我会基于此继续完善 PRD。
+Please provide your answers, and I'll continue refining the PRD.
 ```
 
 **After Each User Response**:
@@ -173,18 +173,18 @@ Identify missing information across four dimensions:
 
 **Score Update Format**:
 ```markdown
-感谢您的补充! 
+Thank you for the additional information!
 
-**清晰度评分更新**: X/100 → Y/100
+**Clarity Score Update**: X/100 → Y/100
 
-**新增明确的内容**:
+**New Clarified Content**:
 - [Summarize new information]
 
-**剩余需要澄清的点**:
+**Remaining Points to Clarify**:
 - [List remaining gaps if score < 90]
 
 [If score < 90: Continue with next round of questions]
-[If score ≥ 90: "完美! 我现在将生成完整的 PRD 文档..."]
+[If score ≥ 90: "Perfect! I will now generate the complete PRD document..."]
 ```
 
 ### Step 4: PRD Generation
@@ -201,99 +201,99 @@ Once clarity score ≥ 90, generate comprehensive PRD.
 ## PRD Document Structure
 
 ```markdown
-# {Feature Name} - 产品需求文档 (PRD)
+# {Feature Name} - Product Requirements Document (PRD)
 
-## 需求描述 (Requirements Description)
+## Requirements Description
 
-### 背景 (Background)
-- **业务问题**: [描述要解决的业务问题]
-- **目标用户**: [目标用户群体]
-- **价值主张**: [此功能带来的价值]
+### Background
+- **Business Problem**: [Describe the business problem to solve]
+- **Target Users**: [Target user groups]
+- **Value Proposition**: [Value this feature brings]
 
-### 功能概述 (Feature Overview)
-- **核心功能**: [主要功能点列表]
-- **功能边界**: [明确包含和不包含的内容]
-- **用户场景**: [典型使用场景描述]
+### Feature Overview
+- **Core Features**: [List of main features]
+- **Feature Boundaries**: [What is and isn't included]
+- **User Scenarios**: [Typical usage scenarios]
 
-### 详细需求 (Detailed Requirements)
-- **输入/输出**: [具体的输入输出规格]
-- **用户交互**: [用户操作流程]
-- **数据要求**: [数据结构和验证规则]
-- **边界条件**: [边界情况处理]
+### Detailed Requirements
+- **Input/Output**: [Specific input/output specifications]
+- **User Interaction**: [User operation flow]
+- **Data Requirements**: [Data structures and validation rules]
+- **Edge Cases**: [Edge case handling]
 
-## 设计决策 (Design Decisions)
+## Design Decisions
 
-### 技术方案 (Technical Approach)
-- **架构选择**: [技术架构决策及理由]
-- **关键组件**: [主要技术组件列表]
-- **数据存储**: [数据模型和存储方案]
-- **接口设计**: [API/接口规格]
+### Technical Approach
+- **Architecture Choice**: [Technical architecture decisions and rationale]
+- **Key Components**: [List of main technical components]
+- **Data Storage**: [Data models and storage solutions]
+- **Interface Design**: [API/interface specifications]
 
-### 约束条件 (Constraints)
-- **性能要求**: [响应时间、吞吐量等]
-- **兼容性**: [系统兼容性要求]
-- **安全性**: [安全相关考虑]
-- **可扩展性**: [未来扩展考虑]
+### Constraints
+- **Performance Requirements**: [Response time, throughput, etc.]
+- **Compatibility**: [System compatibility requirements]
+- **Security**: [Security considerations]
+- **Scalability**: [Future expansion considerations]
 
-### 风险评估 (Risk Assessment)
-- **技术风险**: [潜在技术风险及缓解方案]
-- **依赖风险**: [外部依赖及备选方案]
-- **时间风险**: [进度风险及应对策略]
+### Risk Assessment
+- **Technical Risks**: [Potential technical risks and mitigation plans]
+- **Dependency Risks**: [External dependencies and alternatives]
+- **Schedule Risks**: [Timeline risks and response strategies]
 
-## 验收标准 (Acceptance Criteria)
+## Acceptance Criteria
 
-### 功能验收 (Functional Acceptance)
-- [ ] 功能点1: [具体验收条件]
-- [ ] 功能点2: [具体验收条件]
-- [ ] 功能点3: [具体验收条件]
+### Functional Acceptance
+- [ ] Feature 1: [Specific acceptance conditions]
+- [ ] Feature 2: [Specific acceptance conditions]
+- [ ] Feature 3: [Specific acceptance conditions]
 
-### 质量标准 (Quality Standards)
-- [ ] 代码质量: [代码规范和审查要求]
-- [ ] 测试覆盖: [测试要求和覆盖率]
-- [ ] 性能指标: [性能测试通过标准]
-- [ ] 安全检查: [安全审查要求]
+### Quality Standards
+- [ ] Code Quality: [Code standards and review requirements]
+- [ ] Test Coverage: [Testing requirements and coverage]
+- [ ] Performance Metrics: [Performance test pass criteria]
+- [ ] Security Review: [Security review requirements]
 
-### 用户验收 (User Acceptance)
-- [ ] 用户体验: [UX验收标准]
-- [ ] 文档完整: [文档交付要求]
-- [ ] 培训材料: [如需要,培训材料要求]
+### User Acceptance
+- [ ] User Experience: [UX acceptance criteria]
+- [ ] Documentation: [Documentation delivery requirements]
+- [ ] Training Materials: [If needed, training material requirements]
 
-## 执行 Phase (Execution Phases)
+## Execution Phases
 
-### Phase 1: 准备阶段 (Preparation)
-**目标**: 环境准备和技术验证
-- [ ] 任务1: [具体任务描述]
-- [ ] 任务2: [具体任务描述]
-- **产出**: [阶段交付物]
-- **时间**: [预估时间]
+### Phase 1: Preparation
+**Goal**: Environment preparation and technical validation
+- [ ] Task 1: [Specific task description]
+- [ ] Task 2: [Specific task description]
+- **Deliverables**: [Phase deliverables]
+- **Time**: [Estimated time]
 
-### Phase 2: 核心开发 (Core Development)
-**目标**: 实现核心功能
-- [ ] 任务1: [具体任务描述]
-- [ ] 任务2: [具体任务描述]
-- **产出**: [阶段交付物]
-- **时间**: [预估时间]
+### Phase 2: Core Development
+**Goal**: Implement core functionality
+- [ ] Task 1: [Specific task description]
+- [ ] Task 2: [Specific task description]
+- **Deliverables**: [Phase deliverables]
+- **Time**: [Estimated time]
 
-### Phase 3: 集成测试 (Integration & Testing)
-**目标**: 集成和质量保证
-- [ ] 任务1: [具体任务描述]
-- [ ] 任务2: [具体任务描述]
-- **产出**: [阶段交付物]
-- **时间**: [预估时间]
+### Phase 3: Integration & Testing
+**Goal**: Integration and quality assurance
+- [ ] Task 1: [Specific task description]
+- [ ] Task 2: [Specific task description]
+- **Deliverables**: [Phase deliverables]
+- **Time**: [Estimated time]
 
-### Phase 4: 部署上线 (Deployment)
-**目标**: 发布和监控
-- [ ] 任务1: [具体任务描述]
-- [ ] 任务2: [具体任务描述]
-- **产出**: [阶段交付物]
-- **时间**: [预估时间]
+### Phase 4: Deployment
+**Goal**: Release and monitoring
+- [ ] Task 1: [Specific task description]
+- [ ] Task 2: [Specific task description]
+- **Deliverables**: [Phase deliverables]
+- **Time**: [Estimated time]
 
 ---
 
-**文档版本**: 1.0  
-**创建时间**: {timestamp}  
-**澄清轮数**: {clarification_rounds}  
-**质量评分**: {quality_score}/100
+**Document Version**: 1.0  
+**Created**: {timestamp}  
+**Clarification Rounds**: {clarification_rounds}  
+**Quality Score**: {quality_score}/100
 ```
 
 ---
@@ -328,10 +328,10 @@ Once clarity score ≥ 90, generate comprehensive PRD.
 ...
 
 ## Final Clarity Assessment
-- 功能清晰度 (Functional Clarity): X/30
-- 技术具体性 (Technical Specificity): X/25
-- 实现完整性 (Implementation Completeness): X/25
-- 业务背景 (Business Context): X/20
+- Functional Clarity: X/30
+- Technical Specificity: X/25
+- Implementation Completeness: X/25
+- Business Context: X/20
 - **Total**: X/100 ✓
 
 ## Key Decisions Made
@@ -369,7 +369,7 @@ Once clarity score ≥ 90, generate comprehensive PRD.
 - Provide examples to guide users
 - Maintain conversational tone
 - Document all clarification rounds
-- Use Chinese for section headers
+- Use clear, professional English
 - Generate concrete specifications
 - Stay in clarification mode until score ≥ 90
 
@@ -387,80 +387,80 @@ Once clarity score ≥ 90, generate comprehensive PRD.
 ## Example Clarification Flow
 
 ```
-User: "我要做一个用户登录功能"
+User: "I want to implement a user login feature"
 
 Claude: (Detects vague requirement → Auto-activates requirements-clarity skill)
 
-我已经理解您的需求。让我帮您完善这个登录功能的需求规格。
+I understand your requirement. Let me help you refine this login feature specification.
 
-**当前清晰度评分**: 35/100
+**Current Clarity Score**: 35/100
 
-**已明确的部分**:
-- 需要实现用户登录功能
+**Clear Aspects**:
+- Need to implement user login functionality
 
-**需要澄清的部分**:
-- 登录方式和技术实现
-- 功能边界和用户交互
-- 安全性和性能要求
+**Needs Clarification**:
+- Login method and technical implementation
+- Feature boundaries and user interaction
+- Security and performance requirements
 
-让我开始系统性地澄清这些内容:
-
----
-
-我需要澄清以下几点以完善需求文档:
-
-1. **用户交互**: 用户将通过什么方式登录?
-   - 例如: 用户名+密码, 手机号+验证码, 第三方OAuth (Google/GitHub)等
-
-2. **功能范围**: 除了基本登录,是否需要:
-   - 记住登录状态 (Remember Me)?
-   - 忘记密码功能?
-   - 多设备登录管理?
-
-3. **技术约束**: 
-   - 后端技术栈是什么? (Go/Node/Python/Java等)
-   - 是否已有用户数据库?
-   - 是否需要JWT token认证?
-
-请提供您的答案,我会基于此继续完善 PRD。
+Let me systematically clarify these points:
 
 ---
 
-[User responds: "用户名+密码, 需要记住登录和忘记密码, 后端用Go, 已有PostgreSQL, 需要JWT"]
+I need to clarify the following points to complete the requirements document:
+
+1. **User Interaction**: How will users log in?
+   - For example: Username+password, phone+SMS code, third-party OAuth (Google/GitHub), etc.
+
+2. **Feature Scope**: Besides basic login, do you need:
+   - Remember Me functionality?
+   - Forgot password feature?
+   - Multi-device login management?
+
+3. **Technical Constraints**: 
+   - What is the backend technology stack? (Go/Node/Python/Java, etc.)
+   - Do you already have a user database?
+   - Do you need JWT token authentication?
+
+Please provide your answers, and I'll continue refining the PRD.
 
 ---
 
-Claude: 感谢您的补充! 
+[User responds: "Username+password, need remember me and forgot password, backend is Go, have PostgreSQL, need JWT"]
 
-**清晰度评分更新**: 35/100 → 72/100
+---
 
-**新增明确的内容**:
-- 登录方式: 用户名+密码
-- 功能范围: 基本登录 + 记住登录 + 忘记密码
-- 技术栈: Go后端 + PostgreSQL + JWT认证
+Claude: Thank you for the additional information!
 
-**剩余需要澄清的点**:
-- 安全性要求
-- 错误处理策略
-- 性能指标
+**Clarity Score Update**: 35/100 → 72/100
 
-继续澄清:
+**New Clarified Content**:
+- Login method: Username+password
+- Feature scope: Basic login + Remember Me + Forgot password
+- Tech stack: Go backend + PostgreSQL + JWT authentication
 
-1. **安全性**: 
-   - 密码加密方式有要求吗? (bcrypt/argon2/scrypt)
-   - 是否需要限制登录尝试次数? (防暴力破解)
-   - JWT token过期时间? (例如: 24小时, 7天)
-   - Remember Me token有效期?
+**Remaining Points to Clarify**:
+- Security requirements
+- Error handling strategy
+- Performance metrics
 
-2. **错误处理**:
-   - 登录失败时如何提示用户? (显示具体错误 vs 模糊提示)
-   - 是否需要审计日志记录登录行为?
+Continuing clarification:
 
-3. **性能要求**:
-   - 预期并发登录用户数?
-   - 响应时间要求? (例如: 登录接口 < 500ms)
+1. **Security**: 
+   - Password encryption requirements? (bcrypt/argon2/scrypt)
+   - Should we limit login attempts? (brute force protection)
+   - JWT token expiration time? (e.g., 24 hours, 7 days)
+   - Remember Me token validity period?
 
-请继续补充,我们快完成了!
+2. **Error Handling**:
+   - How to notify users on login failure? (specific errors vs vague messages)
+   - Should we log all login attempts for audit?
+
+3. **Performance Requirements**:
+   - Expected concurrent login users?
+   - Response time requirements? (e.g., login API < 500ms)
+
+Please continue, we're almost done!
 
 ---
 
@@ -468,33 +468,33 @@ Claude: 感谢您的补充!
 
 ---
 
-Claude: 完美! 
+Claude: Perfect!
 
-**清晰度评分更新**: 72/100 → 93/100 ✓
+**Clarity Score Update**: 72/100 → 93/100 ✓
 
-**新增明确的内容**:
-- 安全: bcrypt加密, 5次失败锁定15分钟, JWT 24小时过期
-- 日志: 记录所有登录尝试
-- 性能: 支持1000并发, 响应 < 300ms
+**New Clarified Content**:
+- Security: bcrypt encryption, 5 failed attempts locks for 15 min, JWT expires in 24h
+- Logging: Record all login attempts
+- Performance: Support 1000 concurrent users, response < 300ms
 
-需求已经非常清晰,我现在将生成完整的 PRD 文档...
+Requirements are now very clear. I will now generate the complete PRD document...
 
 [Creates ./.claude/specs/user-login/ directory]
 [Generates clarification-log.md]
 [Generates prd.md]
 
-✅ **PRD 已生成**: 
+✅ **PRD Generated**: 
 
-1. **需求文档**: `./.claude/specs/user-login/prd.md`
-2. **澄清记录**: `./.claude/specs/user-login/clarification-log.md`
+1. **Requirements Document**: `./.claude/specs/user-login/prd.md`
+2. **Clarification Log**: `./.claude/specs/user-login/clarification-log.md`
 
-**文档概览**:
-- 需求描述: 完整的功能、用户场景、技术方案
-- 设计决策: Go + PostgreSQL + JWT + bcrypt架构
-- 验收标准: 12项功能验收 + 8项质量标准
-- 执行Phase: 4个阶段,预估2-3周完成
+**Document Overview**:
+- Requirements Description: Complete features, user scenarios, technical approach
+- Design Decisions: Go + PostgreSQL + JWT + bcrypt architecture
+- Acceptance Criteria: 12 functional acceptance + 8 quality standards
+- Execution Phases: 4 phases, estimated 2-3 weeks
 
-您可以查看文档并确认是否需要调整。如果满意,我可以立即开始实施! 🚀
+You can review the document and confirm if any adjustments are needed. If satisfied, I can start implementation immediately! 🚀
 ```
 
 ---
@@ -516,7 +516,7 @@ Claude: 完美!
 2. **Persistent Mode**: Stay in clarification mode throughout the conversation until PRD is complete
 3. **Never Skip**: Always iterate until ≥ 90 score, never generate PRD prematurely
 4. **Document Everything**: Save both clarification-log.md and prd.md
-5. **User Language**: Use Chinese for section headers, mixed Chinese/English for content
+5. **Language**: Use clear, professional English throughout
 6. **Concrete Specifications**: Avoid vague language, make everything measurable and actionable
 7. **Build Context**: Each question round builds on previous answers
 8. **Quality Gate**: Requirements clarity is a quality gate - prevent unclear specs from proceeding to implementation
