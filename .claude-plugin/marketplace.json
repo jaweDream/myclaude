@@ -78,9 +78,6 @@
         "./agents/bmad-qa.md",
         "./agents/bmad-orchestrator.md",
         "./agents/bmad-review.md"
-      ],
-      "output-styles": [
-        "./output-styles/bmad.md"
       ]
     },
     {
