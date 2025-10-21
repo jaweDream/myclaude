@@ -172,11 +172,8 @@
       ],
       "category": "essentials",
       "strict": false,
-      "commands": [
-        "./commands/clarif.md"
-      ],
-      "agents": [
-        "./agents/clarif-agent.md"
+      "skills": [
+        "./skills/SKILL.md"
       ]
     }
   ]
