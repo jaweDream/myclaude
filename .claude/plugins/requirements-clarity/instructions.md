@@ -1,21 +1,8 @@
----
-name: requirements-clarity
-description: Automatically detect vague requirements and transform them into crystal-clear Product Requirements Documents (PRDs) through systematic clarification
-activation_triggers:
-  - User describes a feature without technical details
-  - Request lacks acceptance criteria or success metrics
-  - Scope is ambiguous (e.g., "add authentication", "implement user management")
-  - Missing technology stack or implementation constraints
-  - No edge cases or error handling mentioned
-  - Vague action verbs without specifics ("add", "create", "improve", "fix")
-tools: Read, Write, Glob, Grep, TodoWrite
----
-
 # Requirements Clarity Skill
 
 ## When to Activate
 
-This skill should automatically activate when Claude detects:
+This skill automatically activates when Claude detects:
 
 1. **Vague Feature Requests**
    - User says: "add login feature", "implement payment", "create dashboard"
@@ -494,7 +481,7 @@ Requirements are now very clear. I will now generate the complete PRD document..
 - Acceptance Criteria: 12 functional acceptance + 8 quality standards
 - Execution Phases: 4 phases, estimated 2-3 weeks
 
-You can review the document and confirm if any adjustments are needed. If satisfied, I can start implementation immediately! 🚀
+You can review the document and confirm if any adjustments are needed. If satisfied, I can start implementation immediately!
 ```
 
 ---
@@ -503,7 +490,7 @@ You can review the document and confirm if any adjustments are needed. If satisf
 
 - Clarity score ≥ 90/100
 - All PRD sections complete with substance
-- Acceptance criteria checklistable (使用 `- [ ]` 格式)
+- Acceptance criteria checklistable (using `- [ ]` format)
 - Execution phases actionable with concrete tasks
 - User approves final PRD
 - Ready for development handoff

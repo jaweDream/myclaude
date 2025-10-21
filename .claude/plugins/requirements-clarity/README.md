@@ -1,18 +1,37 @@
-# Requirements Clarity Skill
+# Requirements Clarity Plugin
 
 ## Overview
 
-This Claude Skill automatically detects vague requirements and transforms them into crystal-clear Product Requirements Documents (PRDs) through systematic clarification.
+This Claude Code plugin automatically detects vague requirements and transforms them into crystal-clear Product Requirements Documents (PRDs) through systematic clarification.
 
-**Key Difference from `/clarif` Command**:
-- **Command**: User must type `/clarif <requirement>` explicitly
-- **Skill**: Claude automatically detects unclear requirements and activates clarification mode
+**Plugin vs Skill vs Command**:
+- **Plugin**: Distributable package with metadata (`claude.json`)
+- **Skill**: Auto-activated behavior (part of plugin)
+- **Command**: Manual invocation (deprecated in favor of plugin)
+
+## Installation
+
+```bash
+/plugin install requirements-clarity
+```
+
+Or add to your `.clauderc`:
+
+```json
+{
+  "plugins": {
+    "requirements-clarity": {
+      "enabled": true
+    }
+  }
+}
+```
 
 ## How It Works
 
 ### Automatic Activation
 
-The skill activates when Claude detects:
+The plugin activates when Claude detects:
 
 1. **Vague Feature Requests**
    ```
@@ -181,18 +200,7 @@ Structured PRD with four main sections:
 - Skill does NOT activate (requirement is already clear)
 - Claude proceeds directly to implementation
 
-## Comparison: Command vs Skill
-
-| Aspect | `/clarif` Command | Requirements-Clarity Skill |
-|--------|-------------------|----------------------------|
-| **Activation** | Manual: `/clarif <requirement>` | Automatic: Claude detects vague specs |
-| **User Awareness** | Must know command exists | Transparent, no learning curve |
-| **Workflow** | User → Type command → Clarification | User → Express need → Auto-clarification |
-| **Discoverability** | Requires documentation | Claude suggests when appropriate |
-| **Use Case** | Explicit requirements review | Proactive quality gate |
-| **File Location** | `commands/clarif.md` + `agents/clarif-agent.md` | `.claude/skills/requirements-clarity/SKILL.md` |
-
-## Benefits of Skill Approach
+## Benefits
 
 1. **Proactive Quality Gate**: Prevents unclear specs from proceeding to implementation
 2. **Zero Friction**: Users describe features naturally, no command syntax needed
@@ -202,37 +210,37 @@ Structured PRD with four main sections:
 
 ## Configuration
 
-No configuration needed - the skill is automatically discovered by Claude Code when present in `.claude/skills/requirements-clarity/`.
+No configuration needed - the plugin is automatically discovered by Claude Code when installed.
 
-**Skill Metadata** (in SKILL.md frontmatter):
-```yaml
-name: requirements-clarity
-description: Automatically clarify vague requirements into actionable PRDs
-activation_triggers:
-  - User describes feature without technical details
-  - Request lacks acceptance criteria
-  - Scope is ambiguous
-  - Missing technology stack
-tools: Read, Write, Glob, Grep, TodoWrite
+**Plugin Metadata** (in claude.json):
+```json
+{
+  "name": "requirements-clarity",
+  "version": "1.0.0",
+  "description": "Automatically clarify vague requirements into actionable PRDs",
+  "components": {
+    "skills": ["requirements-clarity"]
+  }
+}
 ```
 
 ## Troubleshooting
 
-### Skill Not Activating
+### Plugin Not Activating
 
 **Problem**: Claude doesn't enter clarification mode for vague requirements
 
 **Solutions**:
-1. Verify `.claude/skills/requirements-clarity/SKILL.md` exists
-2. Check YAML frontmatter is valid
-3. Ensure activation_triggers are defined
+1. Verify plugin is installed: `/plugin list`
+2. Check plugin is enabled in `.clauderc`
+3. Ensure `instructions.md` exists in plugin directory
 4. Try more explicit vague requirement: "add user feature"
 
 ### Premature PRD Generation
 
 **Problem**: PRD generated before score reaches 90
 
-**Solution**: This is a bug - SKILL.md explicitly requires ≥90 threshold. Review the clarification log to see actual score.
+**Solution**: This is a bug - instructions.md explicitly requires ≥90 threshold. Review the clarification log to see actual score.
 
 ### Over-Clarification
 
@@ -240,23 +248,11 @@ tools: Read, Write, Glob, Grep, TodoWrite
 
 **Expected**: This is by design - better to over-clarify than under-specify. If the requirement is truly simple, answer questions quickly to reach 90+ score faster.
 
-## Migration from `/clarif` Command
-
-The `/clarif` command in `development-essentials/commands/clarif.md` can coexist with this skill:
-
-- **Skill**: Automatic activation for new, unclear requirements
-- **Command**: Explicit review of existing requirements
-
-**Recommended Workflow**:
-1. User describes feature naturally
-2. Skill auto-activates and generates PRD
-3. (Optional) User runs `/clarif <existing-prd>` to review/refine
-
 ## Examples
 
 ### Example 1: Login Feature (Full Flow)
 
-See full example in SKILL.md under "Example Clarification Flow"
+See full example in instructions.md under "Example Clarification Flow"
 
 **Summary**:
 - Input: "I want to implement a user login feature"
@@ -294,18 +290,22 @@ PRD Generated:
 
 ## References
 
-- **Claude Skills Documentation**: https://docs.claude.com/en/docs/claude-code/skills
-- **Anthropic Skills Announcement**: https://www.anthropic.com/news/skills
+- **Claude Code Plugins Documentation**: https://docs.claude.com/en/docs/claude-code/plugins
 - **Original `/clarif` Command**: `development-essentials/commands/clarif.md`
 - **Original Clarification Agent**: `development-essentials/agents/clarif-agent.md`
 
 ## Changelog
 
-### v1.0 (2025-10-20)
-- Initial skill implementation
-- Ported clarification logic from `/clarif` command
-- Added automatic activation triggers
-- Implemented 100-point scoring system
-- Created structured PRD template with Requirements/Design/Acceptance/Execution sections
-- Added comprehensive test cases and examples
-- Translated to English for plugin compatibility
+### v1.0.0 (2025-10-21)
+- Converted skill to plugin format
+- Added `claude.json` plugin metadata
+- Translated all prompts to English (was mixed Chinese/English)
+- Updated documentation for plugin distribution
+- Maintained 100-point scoring system and PRD structure
+- Compatible with Claude Code plugin system
+
+---
+
+**License**: MIT  
+**Author**: stellarlink  
+**Homepage**: https://github.com/cexll/myclaude
