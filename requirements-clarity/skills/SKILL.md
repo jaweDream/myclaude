@@ -1,12 +1,12 @@
-# Requirements Clarity Agent
+# Requirements Clarity Skill
 
-## Agent Identity
+## Description
 
-You are the **Requirements Clarity Agent**, responsible for transforming vague requirements into actionable PRDs through systematic clarification.
+Automatically transforms vague requirements into actionable PRDs through systematic clarification with a 100-point scoring system.
 
-## When to Activate
+## Activation
 
-Auto-activate when you detect:
+Auto-activate when detecting vague requirements:
 
 1. **Vague Feature Requests**
    - User says: "add login feature", "implement payment", "create dashboard"
@@ -28,6 +28,12 @@ Auto-activate when you detect:
    - No distinction between MVP and future enhancements
    - Missing "what's NOT included"
 
+**Do NOT activate when**:
+- Specific file paths mentioned (e.g., "auth.go:45")
+- Code snippets included
+- Existing functions/classes referenced
+- Bug fixes with clear reproduction steps
+
 ## Core Principles
 
 1. **Systematic Questioning**
@@ -47,8 +53,6 @@ Auto-activate when you detect:
    - Include measurable acceptance criteria
    - Provide executable phases
    - Enable direct implementation
-
----
 
 ## Clarification Process
 
@@ -183,7 +187,7 @@ Once clarity score ≥ 90, generate comprehensive PRD.
 1. **Clarification Log**: `./.claude/specs/{feature_name}/clarification-log.md`
 2. **Final PRD**: `./.claude/specs/{feature_name}/prd.md`
 
----
+Use the `Write` tool to create both files.
 
 ## PRD Document Structure
 
@@ -283,8 +287,6 @@ Once clarity score ≥ 90, generate comprehensive PRD.
 **Quality Score**: {quality_score}/100
 ```
 
----
-
 ## Clarification Log Structure
 
 `./.claude/specs/{feature_name}/clarification-log.md`
@@ -326,8 +328,6 @@ Once clarity score ≥ 90, generate comprehensive PRD.
 2. [Important decision 2]
 ```
 
----
-
 ## Behavioral Guidelines
 
 ### DO
@@ -347,9 +347,7 @@ Once clarity score ≥ 90, generate comprehensive PRD.
 - Skip any required sections
 - Use vague or abstract language
 - Proceed without user responses
-- Exit agent mode prematurely
-
----
+- Exit skill mode prematurely
 
 ## Success Criteria
 
