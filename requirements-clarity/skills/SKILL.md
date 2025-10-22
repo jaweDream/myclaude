@@ -63,8 +63,9 @@ Auto-activate when detecting vague requirements:
 **Tasks**:
 1. Parse and understand core requirement
 2. Generate feature name (kebab-case format)
-3. Create output directory: `./.claude/specs/{feature_name}/`
-4. Perform initial clarity assessment (0-100)
+3. Determine document version (default `1.0` unless user specifies otherwise)
+4. Ensure `./docs/prds/` exists for PRD output
+5. Perform initial clarity assessment (0-100)
 
 **Assessment Rubric**:
 ```
@@ -157,7 +158,7 @@ Please provide your answers, and I'll continue refining the PRD.
 
 **After Each User Response**:
 1. Update clarity score
-2. Document new information in clarification log
+2. Capture new information in the working PRD outline
 3. Identify remaining gaps
 4. If score < 90: Continue with next round of questions
 5. If score ≥ 90: Proceed to PRD generation
@@ -182,12 +183,11 @@ Thank you for the additional information!
 
 Once clarity score ≥ 90, generate comprehensive PRD.
 
-**Output Files**:
+**Output File**:
 
-1. **Clarification Log**: `./.claude/specs/{feature_name}/clarification-log.md`
-2. **Final PRD**: `./.claude/specs/{feature_name}/prd.md`
+1. **Final PRD**: `./docs/prds/{feature_name}-v{version}-prd.md`
 
-Use the `Write` tool to create both files.
+Use the `Write` tool to create or update this file. Derive `{version}` from the document version recorded in the PRD (default `1.0`).
 
 ## PRD Document Structure
 
@@ -287,47 +287,6 @@ Use the `Write` tool to create both files.
 **Quality Score**: {quality_score}/100
 ```
 
-## Clarification Log Structure
-
-`./.claude/specs/{feature_name}/clarification-log.md`
-
-```markdown
-# Requirements Clarification Log
-
-## Original Requirement
-[User's initial input]
-
-## Clarification Rounds
-
-### Round 1 (Score: X/100)
-**Questions**:
-1. ...
-2. ...
-
-**User Responses**:
-1. ...
-2. ...
-
-**Score Update**: X → Y points
-
-**Gaps Addressed**:
-- [List what became clear]
-
-### Round 2 (Score: Y/100)
-...
-
-## Final Clarity Assessment
-- Functional Clarity: X/30
-- Technical Specificity: X/25
-- Implementation Completeness: X/25
-- Business Context: X/20
-- **Total**: X/100 ✓
-
-## Key Decisions Made
-1. [Important decision 1]
-2. [Important decision 2]
-```
-
 ## Behavioral Guidelines
 
 ### DO
@@ -335,7 +294,7 @@ Use the `Write` tool to create both files.
 - Build on previous answers
 - Provide examples to guide users
 - Maintain conversational tone
-- Document all clarification rounds
+- Summarize clarification rounds within the PRD
 - Use clear, professional English
 - Generate concrete specifications
 - Stay in clarification mode until score ≥ 90
