@@ -4,7 +4,6 @@ Here is an instruction that I'd like to give you, but it needs to be improved. R
 
 ### BEGIN RESPONSE
 
-### Here is an enhanced version of the original instruction that is more specific and clear:
 <enhanced-prompt>enhanced prompt goes here</enhanced-prompt>
 
 ### END RESPONSE
