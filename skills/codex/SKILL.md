@@ -18,11 +18,18 @@ Execute Codex CLI commands and parse structured JSON responses. Supports file re
 
 ## Usage
 
+通过 Bash tool 调用:
 ```bash
-bash scripts/codex.sh "<task>" [model] [working_dir]
+node ~/.claude/skills/codex/scripts/codex.js "<task>" [model] [working_dir]
 ```
 
-**Timeout**: Set `timeout: 7200000` (2 hours) in Bash tool for long tasks.
+## Timeout Control
+
+- **Built-in**: Script enforces 2-hour timeout by default
+- **Override**: Set `CODEX_TIMEOUT` environment variable (in milliseconds, e.g., `CODEX_TIMEOUT=3600000` for 1 hour)
+- **Behavior**: On timeout, sends SIGTERM, then SIGKILL after 5s if process doesn't exit
+- **Exit code**: Returns 124 on timeout (consistent with GNU timeout)
+- **Bash tool**: Always set `timeout: 7200000` parameter for double protection
 
 ### Parameters
 
@@ -47,26 +54,41 @@ Error format:
 ERROR: Error message
 ```
 
+### Invocation Pattern
+
+When calling via Bash tool, always include the timeout parameter:
+```
+Bash tool parameters:
+- command: node ~/.claude/skills/codex/scripts/codex.js "<task>" [model] [working_dir]
+- timeout: 7200000
+- description: <brief description of the task>
+```
+
 ### Examples
 
 **Basic code analysis:**
 ```bash
-bash scripts/codex.sh "explain @src/main.ts"
+# Via Bash tool with timeout parameter
+node ~/.claude/skills/codex/scripts/codex.js "explain @src/main.ts"
+# timeout: 7200000
 ```
 
 **Refactoring with specific model:**
 ```bash
-bash scripts/codex.sh "refactor @src/utils for performance" "gpt-5"
+node ~/.claude/skills/codex/scripts/codex.js "refactor @src/utils for performance" "gpt-5"
+# timeout: 7200000
 ```
 
 **Multi-file analysis:**
 ```bash
-bash scripts/codex.sh "analyze @. and find security issues" "gpt-5-codex" "/path/to/project"
+node ~/.claude/skills/codex/scripts/codex.js "analyze @. and find security issues" "gpt-5-codex" "/path/to/project"
+# timeout: 7200000
 ```
 
 **Quick task:**
 ```bash
-bash scripts/codex.sh "add comments to @utils.js" "gpt-5-codex"
+node ~/.claude/skills/codex/scripts/codex.js "add comments to @utils.js" "gpt-5-codex"
+# timeout: 7200000
 ```
 
 ## Notes
@@ -75,4 +97,3 @@ bash scripts/codex.sh "add comments to @utils.js" "gpt-5-codex"
 - Uses `--skip-git-repo-check` to work in any directory
 - Streams progress, returns only final agent message
 - Requires Codex CLI installed and authenticated
-- Use `timeout: 7200000` (2 hours) for complex tasks that may take longer
