@@ -155,22 +155,24 @@ def main():
         # 等待进程结束
         returncode = process.wait(timeout=timeout_sec)
 
-        if returncode == 0:
-            if last_agent_message:
-                # 输出 agent_message
-                sys.stdout.write(f"{last_agent_message}\n")
+        # 优先检查是否有有效输出，而非退出码
+        if last_agent_message:
+            # 输出 agent_message
+            sys.stdout.write(f"{last_agent_message}\n")
 
-                # 输出 session_id（如果存在）
-                if thread_id:
-                    sys.stdout.write(f"\n---\nSESSION_ID: {thread_id}\n")
+            # 输出 session_id（如果存在）
+            if thread_id:
+                sys.stdout.write(f"\n---\nSESSION_ID: {thread_id}\n")
 
-                sys.exit(0)
-            else:
-                log_error('Codex completed without agent_message output')
-                sys.exit(1)
+            # 有输出但退出码非零，输出警告而非失败
+            if returncode != 0:
+                log_warn(f'Codex completed with non-zero status {returncode} but produced valid output')
+
+            sys.exit(0)
         else:
-            log_error(f'Codex exited with status {returncode}')
-            sys.exit(returncode)
+            # 没有输出才算真正失败
+            log_error(f'Codex exited with status {returncode} without agent_message output')
+            sys.exit(returncode if returncode != 0 else 1)
 
     except subprocess.TimeoutExpired:
         log_error('Codex execution timeout')
