@@ -18,7 +18,7 @@ import sys
 import os
 from typing import Optional
 
-DEFAULT_MODEL = 'gpt-5-codex'
+DEFAULT_MODEL = 'gpt-5.1-codex'
 DEFAULT_WORKDIR = '.'
 DEFAULT_TIMEOUT = 7200  # 2 hours in seconds
 FORCE_KILL_DELAY = 5
