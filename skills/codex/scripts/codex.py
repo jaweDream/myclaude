@@ -5,6 +5,7 @@
 # ///
 """
 Codex CLI wrapper with cross-platform support and session management.
+**FIXED**: Auto-detect long inputs and use stdin mode to avoid shell argument issues.
 
 Usage:
     New session:  uv run codex.py "task" [model] [workdir]
@@ -22,6 +23,7 @@ DEFAULT_MODEL = 'gpt-5.1-codex'
 DEFAULT_WORKDIR = '.'
 DEFAULT_TIMEOUT = 7200  # 2 hours in seconds
 FORCE_KILL_DELAY = 5
+STDIN_THRESHOLD = 800  # Auto-switch to stdin for prompts longer than 800 chars
 
 
 def log_error(message: str):
@@ -88,33 +90,63 @@ def parse_args():
         }
 
 
-def build_codex_args(params: dict) -> list:
-    """构建 codex CLI 参数"""
+def build_codex_args(params: dict, use_stdin: bool) -> list:
+    """
+    构建 codex CLI 参数
+
+    Args:
+        params: 参数字典
+        use_stdin: 是否使用 stdin 模式（不在命令行参数中传递 task）
+    """
     if params['mode'] == 'resume':
-        return [
-            'codex', 'e',
-            '--skip-git-repo-check',
-            '--json',
-            'resume',
-            params['session_id'],
-            params['task']
-        ]
+        if use_stdin:
+            return [
+                'codex', 'e',
+                '--skip-git-repo-check',
+                '--json',
+                'resume',
+                params['session_id'],
+                '-'  # 从 stdin 读取
+            ]
+        else:
+            return [
+                'codex', 'e',
+                '--skip-git-repo-check',
+                '--json',
+                'resume',
+                params['session_id'],
+                params['task']
+            ]
     else:
-        return [
+        base_args = [
             'codex', 'e',
             '-m', params['model'],
             '--dangerously-bypass-approvals-and-sandbox',
             '--skip-git-repo-check',
             '-C', params['workdir'],
-            '--json',
-            params['task']
+            '--json'
         ]
+
+        if use_stdin:
+            base_args.append('-')  # 从 stdin 读取
+        else:
+            base_args.append(params['task'])
+
+        return base_args
 
 
 def main():
     params = parse_args()
-    codex_args = build_codex_args(params)
     timeout_sec = resolve_timeout()
+
+    # **FIX: Auto-detect long inputs and enable stdin mode**
+    task_length = len(params['task'])
+    use_stdin = task_length > STDIN_THRESHOLD
+
+    if use_stdin:
+        log_warn(f"Task length ({task_length} chars) exceeds threshold, using stdin mode to avoid shell escaping issues")
+
+    codex_args = build_codex_args(params, use_stdin)
 
     thread_id: Optional[str] = None
     last_agent_message: Optional[str] = None
@@ -123,11 +155,17 @@ def main():
         # 启动 codex 子进程
         process = subprocess.Popen(
             codex_args,
+            stdin=subprocess.PIPE if use_stdin else None,  # **FIX: Enable stdin**
             stdout=subprocess.PIPE,
             stderr=sys.stderr,  # 错误直接透传到 stderr
             text=True,
             bufsize=1  # 行缓冲
         )
+
+        # **FIX: 如果使用 stdin 模式，写入任务到 stdin**
+        if use_stdin:
+            process.stdin.write(params['task'])
+            process.stdin.close()
 
         # 逐行解析 JSON 输出
         for line in process.stdout:
@@ -155,24 +193,22 @@ def main():
         # 等待进程结束
         returncode = process.wait(timeout=timeout_sec)
 
-        # 优先检查是否有有效输出，而非退出码
-        if last_agent_message:
-            # 输出 agent_message
-            sys.stdout.write(f"{last_agent_message}\n")
+        if returncode == 0:
+            if last_agent_message:
+                # 输出 agent_message
+                sys.stdout.write(f"{last_agent_message}\n")
 
-            # 输出 session_id（如果存在）
-            if thread_id:
-                sys.stdout.write(f"\n---\nSESSION_ID: {thread_id}\n")
+                # 输出 session_id（如果存在）
+                if thread_id:
+                    sys.stdout.write(f"\n---\nSESSION_ID: {thread_id}\n")
 
-            # 有输出但退出码非零，输出警告而非失败
-            if returncode != 0:
-                log_warn(f'Codex completed with non-zero status {returncode} but produced valid output')
-
-            sys.exit(0)
+                sys.exit(0)
+            else:
+                log_error('Codex completed without agent_message output')
+                sys.exit(1)
         else:
-            # 没有输出才算真正失败
-            log_error(f'Codex exited with status {returncode} without agent_message output')
-            sys.exit(returncode if returncode != 0 else 1)
+            log_error(f'Codex exited with status {returncode}')
+            sys.exit(returncode)
 
     except subprocess.TimeoutExpired:
         log_error('Codex execution timeout')
