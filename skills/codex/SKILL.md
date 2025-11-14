@@ -46,8 +46,8 @@ uv run ~/.claude/skills/codex/scripts/codex.py resume <session_id> "<task>" [mod
 ### Parameters
 
 - `task` (required): Task description, supports `@file` references
-- `model` (optional): Model to use (default: gpt-5-codex)
-  - `gpt-5-codex`: Default, optimized for code
+- `model` (optional): Model to use (default: gpt-5.1-codex)
+  - `gpt-5.1-codex`: Default, optimized for code
   - `gpt-5`: Fast general purpose
 - `working_dir` (optional): Working directory (default: current)
 
