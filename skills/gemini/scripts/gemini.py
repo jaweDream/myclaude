@@ -16,7 +16,7 @@ import sys
 import os
 import argparse
 
-DEFAULT_MODEL = 'gemini-3-pro-preview'
+DEFAULT_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-3-pro-preview')
 DEFAULT_WORKDIR = '.'
 DEFAULT_TIMEOUT = 7200  # 2 hours in seconds
 FORCE_KILL_DELAY = 5
