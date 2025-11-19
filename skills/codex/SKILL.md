@@ -35,6 +35,13 @@ Resume a session:
 uv run ~/.claude/skills/codex/scripts/codex.py resume <session_id> "<task>" [model] [working_dir]
 ```
 
+## Environment Variables
+
+- **CODEX_MODEL**: Override default model (default: `gpt-5.1-codex`)
+  - Example: `export CODEX_MODEL=gpt-5-codex`
+- **CODEX_TIMEOUT**: Override timeout in milliseconds (default: 7200000 = 2 hours)
+  - Example: `export CODEX_TIMEOUT=3600000` for 1 hour
+
 ## Timeout Control
 
 - **Built-in**: Script enforces 2-hour timeout by default

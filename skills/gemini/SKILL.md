@@ -30,6 +30,13 @@ uv run ~/.claude/skills/gemini/scripts/gemini.py -m <model> -p "<prompt>" [worki
 python3 ~/.claude/skills/gemini/scripts/gemini.py -m <model> -p "<prompt>" [working_dir]
 ```
 
+## Environment Variables
+
+- **GEMINI_MODEL**: Override default model (default: `gemini-3-pro-preview`)
+  - Example: `export GEMINI_MODEL=gemini-3`
+- **GEMINI_TIMEOUT**: Override timeout in milliseconds (default: 7200000 = 2 hours)
+  - Example: `export GEMINI_TIMEOUT=3600000` for 1 hour
+
 ## Timeout Control
 
 - **Built-in**: Script enforces 2-hour timeout by default
