@@ -38,10 +38,8 @@ python3 ~/.claude/skills/gemini/scripts/gemini.py -m <model> -p "<prompt>" [work
 
 ### Parameters
 
-- `-m, --model` (optional): Model to use (default: gemini-2.5-pro)
-  - `gemini-2.5-pro`: Latest flagship model
-  - `gemini-2.5-flash`: Fast, efficient model
-  - `gemini-1.5-pro`: Previous generation
+- `-m, --model` (optional): Model to use (default: gemini-3-pro-preview)
+  - `gemini-3-pro-preview`: Latest flagship model
 - `-p, --prompt` (required): Task prompt or question
 - `working_dir` (optional): Working directory (default: current)
 
@@ -65,7 +63,7 @@ When calling via Bash tool, always include the timeout parameter:
 
 ```yaml
 Bash tool parameters:
-- command: uv run ~/.claude/skills/gemini/scripts/gemini.py -m gemini-2.5-pro -p "<prompt>"
+- command: uv run ~/.claude/skills/gemini/scripts/gemini.py -m gemini-3-pro-preview -p "<prompt>"
 - timeout: 7200000
 - description: <brief description of the task>
 ```
@@ -74,10 +72,10 @@ Alternatives:
 
 ```yaml
 # Direct execution (simplest)
-- command: ~/.claude/skills/gemini/scripts/gemini.py -m gemini-2.5-pro -p "<prompt>"
+- command: ~/.claude/skills/gemini/scripts/gemini.py -m gemini-3-pro-preview -p "<prompt>"
 
 # Using python3
-- command: python3 ~/.claude/skills/gemini/scripts/gemini.py -m gemini-2.5-pro -p "<prompt>"
+- command: python3 ~/.claude/skills/gemini/scripts/gemini.py -m gemini-3-pro-preview -p "<prompt>"
 ```
 
 ### Examples
@@ -86,38 +84,38 @@ Alternatives:
 
 ```bash
 # Recommended: via uv run
-uv run ~/.claude/skills/gemini/scripts/gemini.py -m gemini-2.5-pro -p "explain quantum computing"
+uv run ~/.claude/skills/gemini/scripts/gemini.py -m gemini-3-pro-preview -p "explain quantum computing"
 # timeout: 7200000
 
 # Alternative: direct execution
-~/.claude/skills/gemini/scripts/gemini.py -m gemini-2.5-pro -p "explain quantum computing"
+~/.claude/skills/gemini/scripts/gemini.py -m gemini-3-pro-preview -p "explain quantum computing"
 ```
 
 **Code analysis:**
 
 ```bash
-uv run ~/.claude/skills/gemini/scripts/gemini.py -m gemini-2.5-flash -p "review this code for security issues: $(cat app.py)"
+uv run ~/.claude/skills/gemini/scripts/gemini.py -m gemini-3-pro-preview -p "review this code for security issues: $(cat app.py)"
 # timeout: 7200000
 ```
 
 **With specific working directory:**
 
 ```bash
-uv run ~/.claude/skills/gemini/scripts/gemini.py -m gemini-2.5-pro -p "analyze project structure" "/path/to/project"
+uv run ~/.claude/skills/gemini/scripts/gemini.py -m gemini-3-pro-preview -p "analyze project structure" "/path/to/project"
 # timeout: 7200000
 ```
 
 **Using fast model:**
 
 ```bash
-uv run ~/.claude/skills/gemini/scripts/gemini.py -m gemini-2.5-flash -p "quick code suggestion"
+uv run ~/.claude/skills/gemini/scripts/gemini.py -m gemini-3-pro-preview -p "quick code suggestion"
 # timeout: 7200000
 ```
 
 **Using python3 directly (alternative):**
 
 ```bash
-python3 ~/.claude/skills/gemini/scripts/gemini.py -m gemini-2.5-pro -p "your prompt here"
+python3 ~/.claude/skills/gemini/scripts/gemini.py -m gemini-3-pro-preview -p "your prompt here"
 ```
 
 ## Notes
