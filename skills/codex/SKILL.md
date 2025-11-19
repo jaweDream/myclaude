@@ -23,6 +23,8 @@ Execute Codex CLI commands and parse structured JSON responses. Supports file re
 uv run ~/.claude/skills/codex/scripts/codex.py "<task>" [model] [working_dir]
 ```
 
+**Foreground only (no background/BashOutput)**: Never set `background: true`, never accept Claude's “Running in the background” mode, and avoid `BashOutput` streaming loops. Keep a single foreground Bash call per Codex task; if work might be long, split it into smaller foreground runs instead of offloading to background execution.
+
 **Optional methods** (direct execution or via Python):
 ```bash
 ~/.claude/skills/codex/scripts/codex.py "<task>" [model] [working_dir]
@@ -65,6 +67,8 @@ Error format (stderr):
 ```
 ERROR: Error message
 ```
+
+Return only the final agent message and session ID—do not paste raw `BashOutput` logs or background-task chatter into the conversation.
 
 ### Invocation Pattern
 
