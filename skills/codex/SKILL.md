@@ -14,33 +14,29 @@ Execute Codex CLI commands and parse structured JSON responses. Supports file re
 - Complex code analysis requiring deep understanding
 - Large-scale refactoring across multiple files
 - Automated code generation with safety controls
-- Tasks requiring specialized reasoning models (gpt-5.1, gpt-5.1-codex)
 
 ## Usage
 
 **Mandatory**: Run every automated invocation through the Bash tool in the foreground with the command below, keeping the `timeout` parameter fixed at `7200000` milliseconds (do not change it or use any other entry point).
 ```bash
-uv run ~/.claude/skills/codex/scripts/codex.py "<task>" [model] [working_dir]
+uv run ~/.claude/skills/codex/scripts/codex.py "<task>" [working_dir]
 ```
 
 **Foreground only (no background/BashOutput)**: Never set `background: true`, never accept Claude's “Running in the background” mode, and avoid `BashOutput` streaming loops. Keep a single foreground Bash call per Codex task; if work might be long, split it into smaller foreground runs instead of offloading to background execution.
 
 **Optional methods** (direct execution or via Python):
 ```bash
-~/.claude/skills/codex/scripts/codex.py "<task>" [model] [working_dir]
+~/.claude/skills/codex/scripts/codex.py "<task>" [working_dir]
 # or
-python3 ~/.claude/skills/codex/scripts/codex.py "<task>" [model] [working_dir]
+python3 ~/.claude/skills/codex/scripts/codex.py "<task>" [working_dir]
 ```
 
 Resume a session:
 ```bash
-uv run ~/.claude/skills/codex/scripts/codex.py resume <session_id> "<task>" [model] [working_dir]
+uv run ~/.claude/skills/codex/scripts/codex.py resume <session_id> "<task>" [working_dir]
 ```
 
 ## Environment Variables
-
-- **CODEX_MODEL**: Override default model (default: `gpt-5.1-codex`)
-  - Example: `export CODEX_MODEL=gpt-5-codex`
 - **CODEX_TIMEOUT**: Override timeout in milliseconds (default: 7200000 = 2 hours)
   - Example: `export CODEX_TIMEOUT=3600000` for 1 hour
 
@@ -55,9 +51,6 @@ uv run ~/.claude/skills/codex/scripts/codex.py resume <session_id> "<task>" [mod
 ### Parameters
 
 - `task` (required): Task description, supports `@file` references
-- `model` (optional): Model to use (default: gpt-5.1-codex)
-  - `gpt-5.1-codex`: Default, optimized for code
-  - `gpt-5.1`: Fast general purpose
 - `working_dir` (optional): Working directory (default: current)
 
 ### Return Format
@@ -82,7 +75,7 @@ Return only the final agent message and session ID—do not paste raw `BashOutpu
 All automated executions may only invoke `uv run ~/.claude/skills/codex/scripts/codex.py "<task>" ...` through the Bash tool in the foreground, and the `timeout` must remain fixed at `7200000` (non-negotiable):
 ```
 Bash tool parameters:
-- command: uv run ~/.claude/skills/codex/scripts/codex.py "<task>" [model] [working_dir]
+- command: uv run ~/.claude/skills/codex/scripts/codex.py "<task>" [working_dir]
 - timeout: 7200000
 - description: <brief description of the task>
 ```
@@ -91,10 +84,10 @@ Run every call in the foreground—never append `&` to background it—so logs a
 Alternatives:
 ```
 # Direct execution (simplest)
-- command: ~/.claude/skills/codex/scripts/codex.py "<task>" [model] [working_dir]
+- command: ~/.claude/skills/codex/scripts/codex.py "<task>" [working_dir]
 
 # Using python3
-- command: python3 ~/.claude/skills/codex/scripts/codex.py "<task>" [model] [working_dir]
+- command: python3 ~/.claude/skills/codex/scripts/codex.py "<task>" [working_dir]
 ```
 
 ### Examples
@@ -109,22 +102,23 @@ uv run ~/.claude/skills/codex/scripts/codex.py "explain @src/main.ts"
 ~/.claude/skills/codex/scripts/codex.py "explain @src/main.ts"
 ```
 
-**Refactoring with specific model:**
+**Refactoring with custom model (via environment variable):**
 ```bash
-uv run ~/.claude/skills/codex/scripts/codex.py "refactor @src/utils for performance" "gpt-5.1-codex"
+# Set model via environment variable
+uv run ~/.claude/skills/codex/scripts/codex.py "refactor @src/utils for performance"
 # timeout: 7200000
 ```
 
 **Multi-file analysis:**
 ```bash
-uv run ~/.claude/skills/codex/scripts/codex.py "analyze @. and find security issues" "gpt-5.1-codex" "/path/to/project"
+uv run ~/.claude/skills/codex/scripts/codex.py "analyze @. and find security issues" "/path/to/project"
 # timeout: 7200000
 ```
 
 **Resume previous session:**
 ```bash
 # First session
-uv run ~/.claude/skills/codex/scripts/codex.py "add comments to @utils.js" "gpt-5.1-codex"
+uv run ~/.claude/skills/codex/scripts/codex.py "add comments to @utils.js"
 # Output includes: SESSION_ID: 019a7247-ac9d-71f3-89e2-a823dbd8fd14
 
 # Continue the conversation

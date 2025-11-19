@@ -8,10 +8,12 @@ Codex CLI wrapper with cross-platform support and session management.
 **FIXED**: Auto-detect long inputs and use stdin mode to avoid shell argument issues.
 
 Usage:
-    New session:  uv run codex.py "task" [model] [workdir]
-    Resume:       uv run codex.py resume <session_id> "task" [model] [workdir]
+    New session:  uv run codex.py "task" [workdir]
+    Resume:       uv run codex.py resume <session_id> "task" [workdir]
     Alternative:  python3 codex.py "task"
     Direct exec:  ./codex.py "task"
+
+    Model configuration: Set CODEX_MODEL environment variable (default: gpt-5.1-codex)
 """
 import subprocess
 import json
@@ -82,15 +84,13 @@ def parse_args():
             'mode': 'resume',
             'session_id': sys.argv[2],
             'task': sys.argv[3],
-            'model': sys.argv[4] if len(sys.argv) > 4 else DEFAULT_MODEL,
-            'workdir': sys.argv[5] if len(sys.argv) > 5 else DEFAULT_WORKDIR
+            'workdir': sys.argv[4] if len(sys.argv) > 4 else DEFAULT_WORKDIR
         }
     else:
         return {
             'mode': 'new',
             'task': sys.argv[1],
-            'model': sys.argv[2] if len(sys.argv) > 2 else DEFAULT_MODEL,
-            'workdir': sys.argv[3] if len(sys.argv) > 3 else DEFAULT_WORKDIR
+            'workdir': sys.argv[2] if len(sys.argv) > 2 else DEFAULT_WORKDIR
         }
 
 
@@ -146,7 +146,7 @@ def build_codex_args(params: dict, target_arg: str) -> list:
     else:
         base_args = [
             'codex', 'e',
-            '-m', params['model'],
+            '-m', DEFAULT_MODEL,
             '--dangerously-bypass-approvals-and-sandbox',
             '--skip-git-repo-check',
             '-C', params['workdir'],
