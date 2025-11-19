@@ -18,19 +18,19 @@ Execute Codex CLI commands and parse structured JSON responses. Supports file re
 
 ## Usage
 
-**推荐方式**（使用 uv run，自动管理 Python 环境）：
+**Mandatory**: Run every automated invocation through the Bash tool in the foreground with the command below, keeping the `timeout` parameter fixed at `7200000` milliseconds (do not change it or use any other entry point).
 ```bash
 uv run ~/.claude/skills/codex/scripts/codex.py "<task>" [model] [working_dir]
 ```
 
-**备选方式**（直接执行或使用 Python）：
+**Optional methods** (direct execution or via Python):
 ```bash
 ~/.claude/skills/codex/scripts/codex.py "<task>" [model] [working_dir]
-# 或
+# or
 python3 ~/.claude/skills/codex/scripts/codex.py "<task>" [model] [working_dir]
 ```
 
-恢复会话:
+Resume a session:
 ```bash
 uv run ~/.claude/skills/codex/scripts/codex.py resume <session_id> "<task>" [model] [working_dir]
 ```
@@ -68,13 +68,14 @@ ERROR: Error message
 
 ### Invocation Pattern
 
-When calling via Bash tool, always include the timeout parameter:
+All automated executions may only invoke `uv run ~/.claude/skills/codex/scripts/codex.py "<task>" ...` through the Bash tool in the foreground, and the `timeout` must remain fixed at `7200000` (non-negotiable):
 ```
 Bash tool parameters:
 - command: uv run ~/.claude/skills/codex/scripts/codex.py "<task>" [model] [working_dir]
 - timeout: 7200000
 - description: <brief description of the task>
 ```
+Run every call in the foreground—never append `&` to background it—so logs and errors stay visible for timely interruption or diagnosis.
 
 Alternatives:
 ```
@@ -125,11 +126,23 @@ uv run ~/.claude/skills/codex/scripts/codex.py resume 019a7247-ac9d-71f3-89e2-a8
 python3 ~/.claude/skills/codex/scripts/codex.py "your task here"
 ```
 
+### Large Task Protocol
+
+- For every large task, first produce a canonical task list that enumerates the Task ID, description, file/directory scope, dependencies, test commands, and the expected Codex Bash invocation.
+- Tasks without dependencies should be executed concurrently via multiple foreground Bash calls (you can keep separate terminal windows) and each run must log start/end times plus any shared resource usage.
+- Reuse context aggressively (such as @spec.md or prior analysis output), and after concurrent execution finishes, reconcile against the task list to report which items completed and which slipped.
+
+| ID | Description | Scope | Dependencies | Tests | Command |
+| --- | --- | --- | --- | --- | --- |
+| T1 | Review @spec.md to extract requirements | docs/, @spec.md | None | None | uv run ~/.claude/skills/codex/scripts/codex.py "analyze requirements @spec.md" |
+| T2 | Implement the module and add test cases | src/module | T1 | npm test -- --runInBand | uv run ~/.claude/skills/codex/scripts/codex.py "implement and test @src/module" |
+
 ## Notes
 
 - **Recommended**: Use `uv run` for automatic Python environment management (requires uv installed)
 - **Alternative**: Direct execution `./codex.py` (uses system Python via shebang)
 - Python implementation using standard library (zero dependencies)
+- All automated runs must use the Bash tool with the fixed timeout to provide dual timeout protection and unified logging/exit semantics; any alternative approach is limited to manual foreground execution.
 - Cross-platform compatible (Windows/macOS/Linux)
 - PEP 723 compliant (inline script metadata)
 - Runs with `--dangerously-bypass-approvals-and-sandbox` for automation (new sessions only)
