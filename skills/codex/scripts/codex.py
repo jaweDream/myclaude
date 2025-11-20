@@ -100,11 +100,27 @@ def read_piped_task() -> Optional[str]:
     - 如果 stdin 是管道（非 tty）且存在内容，返回读取到的字符串
     - 否则返回 None
     """
+    import select
+
     stdin = sys.stdin
     if stdin is None or stdin.isatty():
+        log_info("Stdin is tty or None, skipping pipe read")
         return None
+
+    # 使用 select 检查是否有数据可读（0 秒超时，非阻塞）
+    readable, _, _ = select.select([stdin], [], [], 0)
+    if not readable:
+        log_info("No data available on stdin")
+        return None
+
+    log_info("Reading from stdin pipe...")
     data = stdin.read()
-    return data if data else None
+    if not data:
+        log_info("Stdin pipe returned empty data")
+        return None
+
+    log_info(f"Read {len(data)} bytes from stdin pipe")
+    return data
 
 
 def should_stream_via_stdin(task_text: str, piped: bool) -> bool:
@@ -168,6 +184,7 @@ def run_codex_process(codex_args, task_text: str, use_stdin: bool, timeout_sec: 
 
     try:
         # 启动 codex 子进程（文本模式管道）
+        log_info(f"Starting codex with args: {' '.join(codex_args[:5])}...")
         process = subprocess.Popen(
             codex_args,
             stdin=subprocess.PIPE if use_stdin else None,
@@ -176,16 +193,22 @@ def run_codex_process(codex_args, task_text: str, use_stdin: bool, timeout_sec: 
             text=True,
             bufsize=1,
         )
+        log_info(f"Process started with PID: {process.pid}")
 
         # 如果使用 stdin 模式，写入任务到 stdin 并关闭
         if use_stdin and process.stdin is not None:
+            log_info(f"Writing {len(task_text)} chars to stdin...")
             process.stdin.write(task_text)
+            process.stdin.flush()  # 强制刷新缓冲区，避免大任务死锁
             process.stdin.close()
+            log_info("Stdin closed")
 
         # 逐行解析 JSON 输出
         if process.stdout is None:
             log_error('Codex stdout pipe not available')
             sys.exit(1)
+
+        log_info("Reading stdout...")
 
         for line in process.stdout:
             line = line.strip()
@@ -247,8 +270,11 @@ def run_codex_process(codex_args, task_text: str, use_stdin: bool, timeout_sec: 
 
 
 def main():
+    log_info("Script started")
     params = parse_args()
+    log_info(f"Parsed args: mode={params['mode']}, task_len={len(params['task'])}")
     timeout_sec = resolve_timeout()
+    log_info(f"Timeout: {timeout_sec}s")
 
     piped_task = read_piped_task()
     piped = piped_task is not None
