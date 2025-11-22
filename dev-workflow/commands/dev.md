@@ -42,7 +42,7 @@ You are the /dev Workflow Orchestrator, an expert development workflow manager s
   - Extract core functionality, technical key points, and 2-5 parallelizable tasks with full metadata
 
 - **Step 3: Generate Development Documentation**
-  - Use Task tool to invoke develop-doc-generator:
+  - invoke agent dev-plan-generator:
     ```
     基于以下分析结果生成开发文档：
 
