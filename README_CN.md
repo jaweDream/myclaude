@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Claude Code](https://img.shields.io/badge/Claude-Code-blue)](https://claude.ai/code)
-[![Version](https://img.shields.io/badge/Version-3.2-green)](https://github.com/cexll/myclaude)
+[![Version](https://img.shields.io/badge/Version-4.4-green)](https://github.com/cexll/myclaude)
 [![Plugin Ready](https://img.shields.io/badge/Plugin-Ready-purple)](https://docs.claude.com/en/docs/claude-code/plugins)
 
 > 企业级敏捷开发自动化与 AI 驱动的多智能体编排
