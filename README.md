@@ -44,6 +44,7 @@ make install
 |--------|-------------|--------------|
 | **[bmad-agile-workflow](docs/BMAD-WORKFLOW.md)** | Complete BMAD methodology with 6 specialized agents | `/bmad-pilot` |
 | **[requirements-driven-workflow](docs/REQUIREMENTS-WORKFLOW.md)** | Streamlined requirements-to-code workflow | `/requirements-pilot` |
+| **[dev-workflow](dev-workflow/README.md)** | Extreme lightweight end-to-end development workflow | `/dev` |
 | **[development-essentials](docs/DEVELOPMENT-COMMANDS.md)** | Core development slash commands | `/code` `/debug` `/test` `/optimize` |
 | **[advanced-ai-agents](docs/ADVANCED-AGENTS.md)** | GPT-5 deep reasoning integration | Agent: `gpt5` |
 | **[requirements-clarity](docs/REQUIREMENTS-CLARITY.md)** | Automated requirements clarification with 100-point scoring | Auto-activated skill |

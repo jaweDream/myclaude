@@ -44,6 +44,7 @@ make install
 |------|------|---------|
 | **[bmad-agile-workflow](docs/BMAD-WORKFLOW.md)** | 完整 BMAD 方法论，包含6个专业智能体 | `/bmad-pilot` |
 | **[requirements-driven-workflow](docs/REQUIREMENTS-WORKFLOW.md)** | 精简的需求到代码工作流 | `/requirements-pilot` |
+| **[dev-workflow](dev-workflow/README.md)** | 极简端到端开发工作流 | `/dev` |
 | **[development-essentials](docs/DEVELOPMENT-COMMANDS.md)** | 核心开发斜杠命令 | `/code` `/debug` `/test` `/optimize` |
 | **[advanced-ai-agents](docs/ADVANCED-AGENTS.md)** | GPT-5 深度推理集成 | 智能体: `gpt5` |
 | **[requirements-clarity](docs/REQUIREMENTS-CLARITY.md)** | 自动需求澄清，100分制质量评分 | 自动激活技能 |
