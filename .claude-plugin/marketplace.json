@@ -255,9 +255,6 @@
       ],
       "agents": [
         "./agents/dev-plan-generator.md"
-      ],
-      "skills": [
-        "../skills/codex/SKILL.md"
       ]
     }
   ]
