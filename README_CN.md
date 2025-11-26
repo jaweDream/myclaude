@@ -102,8 +102,8 @@ make deploy-all          # 全部安装
 ```
 
 **方式3: 手动安装**
-- 复制 `/commands/*.md` 到 `~/.config/claude/commands/`
-- 复制 `/agents/*.md` 到 `~/.config/claude/agents/`
+- 复制 `./commands/*.md` 到 `~/.config/claude/commands/`
+- 复制 `./agents/*.md` 到 `~/.config/claude/agents/`
 
 运行 `make help` 查看所有选项。
 
