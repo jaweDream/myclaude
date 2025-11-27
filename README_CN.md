@@ -15,7 +15,7 @@
 
 **插件系统（推荐）**
 ```bash
-/plugin github.com/cexll/myclaude
+/plugin marketplace add cexll/myclaude
 ```
 
 **传统安装**

@@ -15,7 +15,7 @@
 
 **Plugin System (Recommended)**
 ```bash
-/plugin github.com/cexll/myclaude
+/plugin marketplace add cexll/myclaude
 ```
 
 **Traditional Installation**
