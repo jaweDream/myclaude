@@ -13,7 +13,7 @@ case "$ARCH" in
 esac
 
 # Build download URL
-REPO="chenwenjie/myclaude"
+REPO="cexll/myclaude"
 VERSION="latest"
 BINARY_NAME="codex-wrapper-${OS}-${ARCH}"
 URL="https://github.com/${REPO}/releases/${VERSION}/download/${BINARY_NAME}"

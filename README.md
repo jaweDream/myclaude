@@ -92,7 +92,7 @@ make install
 
 **Codex Wrapper** (Go binary for Codex CLI)
 ```bash
-curl -fsSL https://raw.githubusercontent.com/chenwenjie/myclaude/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/cexll/myclaude/refs/heads/master/install.sh | bash
 ```
 
 **Method 1: Plugin Install** (One command)
