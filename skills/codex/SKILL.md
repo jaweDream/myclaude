@@ -20,7 +20,7 @@ Execute Codex CLI commands and parse structured JSON responses. Supports file re
 **Mandatory**: Run every automated invocation through the Bash tool in the foreground with **HEREDOC syntax** to avoid shell quoting issues, keeping the `timeout` parameter fixed at `7200000` milliseconds (do not change it or use any other entry point).
 
 ```bash
-uv run ~/.claude/skills/codex/scripts/codex.py - [working_dir] <<'EOF'
+codex-wrapper - [working_dir] <<'EOF'
 <task content here>
 EOF
 ```
@@ -32,12 +32,12 @@ EOF
 **Simple tasks** (backward compatibility):
 For simple single-line tasks without special characters, you can still use direct quoting:
 ```bash
-uv run ~/.claude/skills/codex/scripts/codex.py "simple task here" [working_dir]
+codex-wrapper "simple task here" [working_dir]
 ```
 
 **Resume a session with HEREDOC:**
 ```bash
-uv run ~/.claude/skills/codex/scripts/codex.py resume <session_id> - [working_dir] <<'EOF'
+codex-wrapper resume <session_id> - [working_dir] <<'EOF'
 <task content>
 EOF
 ```
@@ -46,18 +46,19 @@ EOF
 - **Bash/Zsh**: Use `<<'EOF'` (single quotes prevent variable expansion)
 - **PowerShell 5.1+**: Use `@'` and `'@` (here-string syntax)
   ```powershell
-  uv run ~/.claude/skills/codex/scripts/codex.py - @'
+  codex-wrapper - @'
   task content
   '@
   ```
 
 ## Environment Variables
+
 - **CODEX_TIMEOUT**: Override timeout in milliseconds (default: 7200000 = 2 hours)
   - Example: `export CODEX_TIMEOUT=3600000` for 1 hour
 
 ## Timeout Control
 
-- **Built-in**: Script enforces 2-hour timeout by default
+- **Built-in**: Binary enforces 2-hour timeout by default
 - **Override**: Set `CODEX_TIMEOUT` environment variable (in milliseconds, e.g., `CODEX_TIMEOUT=3600000` for 1 hour)
 - **Behavior**: On timeout, sends SIGTERM, then SIGKILL after 5s if process doesn't exit
 - **Exit code**: Returns 124 on timeout (consistent with GNU timeout)
@@ -91,7 +92,7 @@ All automated executions must use HEREDOC syntax through the Bash tool in the fo
 
 ```
 Bash tool parameters:
-- command: uv run ~/.claude/skills/codex/scripts/codex.py - [working_dir] <<'EOF'
+- command: codex-wrapper - [working_dir] <<'EOF'
   <task content>
   EOF
 - timeout: 7200000
@@ -106,19 +107,19 @@ Run every call in the foreground—never append `&` to background it—so logs a
 
 **Basic code analysis:**
 ```bash
-# Recommended: via uv run with HEREDOC (handles any special characters)
-uv run ~/.claude/skills/codex/scripts/codex.py - <<'EOF'
+# Recommended: with HEREDOC (handles any special characters)
+codex-wrapper - <<'EOF'
 explain @src/main.ts
 EOF
 # timeout: 7200000
 
 # Alternative: simple direct quoting (if task is simple)
-uv run ~/.claude/skills/codex/scripts/codex.py "explain @src/main.ts"
+codex-wrapper "explain @src/main.ts"
 ```
 
 **Refactoring with multiline instructions:**
 ```bash
-uv run ~/.claude/skills/codex/scripts/codex.py - <<'EOF'
+codex-wrapper - <<'EOF'
 refactor @src/utils for performance:
 - Extract duplicate code into helpers
 - Use memoization for expensive calculations
@@ -129,7 +130,7 @@ EOF
 
 **Multi-file analysis:**
 ```bash
-uv run ~/.claude/skills/codex/scripts/codex.py - "/path/to/project" <<'EOF'
+codex-wrapper - "/path/to/project" <<'EOF'
 analyze @. and find security issues:
 1. Check for SQL injection vulnerabilities
 2. Identify XSS risks in templates
@@ -142,13 +143,13 @@ EOF
 **Resume previous session:**
 ```bash
 # First session
-uv run ~/.claude/skills/codex/scripts/codex.py - <<'EOF'
+codex-wrapper - <<'EOF'
 add comments to @utils.js explaining the caching logic
 EOF
 # Output includes: SESSION_ID: 019a7247-ac9d-71f3-89e2-a823dbd8fd14
 
 # Continue the conversation with more context
-uv run ~/.claude/skills/codex/scripts/codex.py resume 019a7247-ac9d-71f3-89e2-a823dbd8fd14 - <<'EOF'
+codex-wrapper resume 019a7247-ac9d-71f3-89e2-a823dbd8fd14 - <<'EOF'
 now add TypeScript type hints and handle edge cases where cache is null
 EOF
 # timeout: 7200000
@@ -156,7 +157,7 @@ EOF
 
 **Task with code snippets and special characters:**
 ```bash
-uv run ~/.claude/skills/codex/scripts/codex.py - <<'EOF'
+codex-wrapper - <<'EOF'
 Fix the bug in @app.js where the regex /\d+/ doesn't match "123"
 The current code is:
   const re = /\d+/;
@@ -173,18 +174,16 @@ EOF
 
 | ID | Description | Scope | Dependencies | Tests | Command |
 | --- | --- | --- | --- | --- | --- |
-| T1 | Review @spec.md to extract requirements | docs/, @spec.md | None | None | `uv run ~/.claude/skills/codex/scripts/codex.py - <<'EOF'`<br/>`analyze requirements @spec.md`<br/>`EOF` |
-| T2 | Implement the module and add test cases | src/module | T1 | npm test -- --runInBand | `uv run ~/.claude/skills/codex/scripts/codex.py - <<'EOF'`<br/>`implement and test @src/module`<br/>`EOF` |
+| T1 | Review @spec.md to extract requirements | docs/, @spec.md | None | None | `codex-wrapper - <<'EOF'`<br/>`analyze requirements @spec.md`<br/>`EOF` |
+| T2 | Implement the module and add test cases | src/module | T1 | npm test -- --runInBand | `codex-wrapper - <<'EOF'`<br/>`implement and test @src/module`<br/>`EOF` |
 
 ## Notes
 
-- **Recommended**: Use `uv run` for automatic Python environment management (requires uv installed)
-- **Alternative**: Direct execution `./codex.py` (uses system Python via shebang)
-- Python implementation using standard library (zero dependencies)
-- All automated runs must use the Bash tool with the fixed timeout to provide dual timeout protection and unified logging/exit semantics; any alternative approach is limited to manual foreground execution.
-- Cross-platform compatible (Windows/macOS/Linux)
-- PEP 723 compliant (inline script metadata)
-- Runs with `--dangerously-bypass-approvals-and-sandbox` for automation (new sessions only)
+- **Binary distribution**: Single Go binary, zero dependencies
+- **Installation**: Download from GitHub Releases or use install.sh
+- **Cross-platform compatible**: Linux (amd64/arm64), macOS (amd64/arm64)
+- All automated runs must use the Bash tool with the fixed timeout to provide dual timeout protection and unified logging/exit semantics
+for automation (new sessions only)
 - Uses `--skip-git-repo-check` to work in any directory
 - Streams progress, returns only final agent message
 - Every execution returns a session ID for resuming conversations
