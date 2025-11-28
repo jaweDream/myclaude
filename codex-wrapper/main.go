@@ -24,9 +24,9 @@ const (
 
 // Test hooks for dependency injection
 var (
-	stdinReader   io.Reader = os.Stdin
-	isTerminalFn            = defaultIsTerminal
-	codexCommand            = "codex"
+	stdinReader  io.Reader = os.Stdin
+	isTerminalFn           = defaultIsTerminal
+	codexCommand           = "codex"
 )
 
 // Config holds CLI configuration
@@ -347,9 +347,7 @@ func runCodexProcess(codexArgs []string, taskText string, useStdin bool, timeout
 
 func parseJSONStream(r io.Reader) (message, threadID string) {
 	scanner := bufio.NewScanner(r)
-	// Set larger buffer for long lines
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 1024*1024)
+	scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -369,18 +367,15 @@ func parseJSONStream(r io.Reader) (message, threadID string) {
 		}
 
 		// Capture agent_message
-		if event.Type == "item.completed" && event.Item != nil {
-			if event.Item.Type == "agent_message" {
-				text := normalizeText(event.Item.Text)
-				if text != "" {
-					message = text
-				}
+		if event.Type == "item.completed" && event.Item != nil && event.Item.Type == "agent_message" {
+			if text := normalizeText(event.Item.Text); text != "" {
+				message = text
 			}
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
-		logWarn("Scanner error: " + err.Error())
+	if err := scanner.Err(); err != nil && err != io.EOF {
+		logWarn("Read stdout error: " + err.Error())
 	}
 
 	return message, threadID
