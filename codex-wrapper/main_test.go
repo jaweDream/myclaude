@@ -330,12 +330,16 @@ func TestNormalizeText(t *testing.T) {
 }
 
 func TestParseJSONStream(t *testing.T) {
-	tests := []struct {
+	type testCase struct {
 		name         string
 		input        string
 		wantMessage  string
 		wantThreadID string
-	}{
+	}
+
+	longText := strings.Repeat("a", 2*1024*1024) // >1MB agent_message payload
+
+	tests := []testCase{
 		{
 			name: "thread started and agent message",
 			input: `{"type":"thread.started","thread_id":"abc-123"}
@@ -365,29 +369,37 @@ func TestParseJSONStream(t *testing.T) {
 			wantThreadID: "",
 		},
 		{
+			name:         "super long single line (>1MB)",
+			input:        `{"type":"item.completed","item":{"type":"agent_message","text":"` + longText + `"}}`,
+			wantMessage:  longText,
+			wantThreadID: "",
+		},
+		{
 			name:         "empty input",
 			input:        "",
 			wantMessage:  "",
 			wantThreadID: "",
 		},
 		{
-			name:         "invalid JSON (skipped)",
-			input:        "not valid json\n{\"type\":\"thread.started\",\"thread_id\":\"xyz\"}",
+			name: "item completed with nil item",
+			input: strings.Join([]string{
+				`{"type":"thread.started","thread_id":"nil-item-thread"}`,
+				`{"type":"item.completed","item":null}`,
+			}, "\n"),
 			wantMessage:  "",
-			wantThreadID: "xyz",
+			wantThreadID: "nil-item-thread",
 		},
 		{
-			name:         "blank lines ignored",
-			input:        "\n\n{\"type\":\"thread.started\",\"thread_id\":\"test\"}\n\n",
+			name:         "agent message with non-string text",
+			input:        `{"type":"item.completed","item":{"type":"agent_message","text":12345}}`,
 			wantMessage:  "",
-			wantThreadID: "test",
+			wantThreadID: "",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r := strings.NewReader(tt.input)
-			gotMessage, gotThreadID := parseJSONStream(r)
+			gotMessage, gotThreadID := parseJSONStream(strings.NewReader(tt.input))
 
 			if gotMessage != tt.wantMessage {
 				t.Errorf("parseJSONStream() message = %q, want %q", gotMessage, tt.wantMessage)
