@@ -624,6 +624,34 @@ func TestMin(t *testing.T) {
 	}
 }
 
+func TestHello(t *testing.T) {
+	got := hello()
+	if got != "hello world" {
+		t.Fatalf("hello() = %q, want %q", got, "hello world")
+	}
+}
+
+func TestGreet(t *testing.T) {
+	got := greet("Linus")
+	if got != "hello Linus" {
+		t.Fatalf("greet() = %q, want %q", got, "hello Linus")
+	}
+}
+
+func TestFarewell(t *testing.T) {
+	got := farewell("Linus")
+	if got != "goodbye Linus" {
+		t.Fatalf("farewell() = %q, want %q", got, "goodbye Linus")
+	}
+}
+
+func TestFarewellEmpty(t *testing.T) {
+	got := farewell("")
+	if got != "goodbye " {
+		t.Fatalf("farewell(\"\") = %q, want %q", got, "goodbye ")
+	}
+}
+
 func TestLogFunctions(t *testing.T) {
 	// Capture stderr
 	oldStderr := os.Stderr

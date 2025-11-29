@@ -206,17 +206,36 @@ EOF
 - `id: <task-id>`: Required, unique task identifier
 - `workdir: <path>`: Optional, working directory (default: `.`)
 - `dependencies: <id1>, <id2>`: Optional, comma-separated task IDs
+- `session_id: <uuid>`: Optional, resume a previous session
 - `---CONTENT---`: Separates metadata from task content
 - Task content: Any text, code, special characters (no escaping needed)
 
-**Output**: JSON with results and summary
-```json
-{
-  "results": [
-    {"task_id": "T1", "exit_code": 0, "message": "...", "session_id": "...", "error": ""}
-  ],
-  "summary": {"total": 3, "success": 3, "failed": 0}
-}
+**Resume Failed Tasks**:
+```bash
+# Use session_id from previous output to resume
+codex-wrapper --parallel - <<'EOF'
+---TASK---
+id: T2
+session_id: 019xxx-previous-session-id
+---CONTENT---
+fix the previous error and retry
+EOF
+```
+
+**Output**: Human-readable text format
+```
+=== Parallel Execution Summary ===
+Total: 3 | Success: 2 | Failed: 1
+
+--- Task: T1 ---
+Status: SUCCESS
+Session: 019xxx
+
+Task output message...
+
+--- Task: T2 ---
+Status: FAILED (exit code 1)
+Error: some error message
 ```
 
 **Features**:

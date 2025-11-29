@@ -26,7 +26,6 @@ const (
 	stdinSpecialChars = "\n\\\"'`$"
 )
 
-
 // Test hooks for dependency injection
 var (
 	stdinReader      io.Reader = os.Stdin
@@ -58,8 +57,8 @@ type TaskSpec struct {
 	Task         string   `json:"task"`
 	WorkDir      string   `json:"workdir,omitempty"`
 	Dependencies []string `json:"dependencies,omitempty"`
+	SessionID    string   `json:"session_id,omitempty"`
 	Mode         string   `json:"-"`
-	SessionID    string   `json:"-"`
 	UseStdin     bool     `json:"-"`
 }
 
@@ -71,7 +70,6 @@ type TaskResult struct {
 	SessionID string `json:"session_id"`
 	Error     string `json:"error"`
 }
-
 
 func parseParallelConfig(data []byte) (*ParallelConfig, error) {
 	trimmed := bytes.TrimSpace(data)
@@ -115,6 +113,9 @@ func parseParallelConfig(data []byte) (*ParallelConfig, error) {
 				task.ID = value
 			case "workdir":
 				task.WorkDir = value
+			case "session_id":
+				task.SessionID = value
+				task.Mode = "resume"
 			case "dependencies":
 				for _, dep := range strings.Split(value, ",") {
 					dep = strings.TrimSpace(dep)
@@ -395,7 +396,6 @@ func run() int {
 			return exitCode
 		}
 	}
-
 
 	logInfo("Script started")
 
@@ -856,8 +856,16 @@ func min(a, b int) int {
 	return b
 }
 
-func test() string {
-	return "hello $world"
+func hello() string {
+	return "hello world"
+}
+
+func greet(name string) string {
+	return "hello " + name
+}
+
+func farewell(name string) string {
+	return "goodbye " + name
 }
 
 func logInfo(msg string) {
