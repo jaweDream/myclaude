@@ -15,6 +15,18 @@ Execute Codex CLI commands and parse structured JSON responses. Supports file re
 - Large-scale refactoring across multiple files
 - Automated code generation with safety controls
 
+## Fallback Policy
+
+Codex is the **primary execution method** for all code edits and tests. Direct execution is only permitted when:
+
+1. Codex is unavailable (service down, network issues)
+2. Codex fails **twice consecutively** on the same task
+
+When falling back to direct execution:
+- Log `CODEX_FALLBACK` with the reason
+- Retry Codex on the next task (don't permanently switch)
+- Document the fallback in the final summary
+
 ## Usage
 
 **Mandatory**: Run every automated invocation through the Bash tool in the foreground with **HEREDOC syntax** to avoid shell quoting issues, keeping the `timeout` parameter fixed at `7200000` milliseconds (do not change it or use any other entry point).
