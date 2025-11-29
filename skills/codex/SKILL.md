@@ -178,16 +178,52 @@ Add proper escaping and handle $variables correctly.
 EOF
 ```
 
-### Large Task Protocol
+### Parallel Execution
 
-- For every large task, first produce a canonical task list that enumerates the Task ID, description, file/directory scope, dependencies, test commands, and the expected Codex Bash invocation.
-- Tasks without dependencies should be executed concurrently via multiple foreground Bash calls (you can keep separate terminal windows) and each run must log start/end times plus any shared resource usage.
-- Reuse context aggressively (such as @spec.md or prior analysis output), and after concurrent execution finishes, reconcile against the task list to report which items completed and which slipped.
+For multiple independent or dependent tasks, use `--parallel` mode with delimiter format:
 
-| ID | Description | Scope | Dependencies | Tests | Command |
-| --- | --- | --- | --- | --- | --- |
-| T1 | Review @spec.md to extract requirements | docs/, @spec.md | None | None | `codex-wrapper - <<'EOF'`<br/>`analyze requirements @spec.md`<br/>`EOF` |
-| T2 | Implement the module and add test cases | src/module | T1 | npm test -- --runInBand | `codex-wrapper - <<'EOF'`<br/>`implement and test @src/module`<br/>`EOF` |
+```bash
+codex-wrapper --parallel - <<'EOF'
+---TASK---
+id: T1
+workdir: .
+---CONTENT---
+analyze requirements @spec.md
+---TASK---
+id: T2
+dependencies: T1
+---CONTENT---
+implement feature based on T1 analysis
+---TASK---
+id: T3
+---CONTENT---
+independent task runs in parallel with T1
+EOF
+```
+
+**Delimiter Format**:
+- `---TASK---`: Starts a new task block
+- `id: <task-id>`: Required, unique task identifier
+- `workdir: <path>`: Optional, working directory (default: `.`)
+- `dependencies: <id1>, <id2>`: Optional, comma-separated task IDs
+- `---CONTENT---`: Separates metadata from task content
+- Task content: Any text, code, special characters (no escaping needed)
+
+**Output**: JSON with results and summary
+```json
+{
+  "results": [
+    {"task_id": "T1", "exit_code": 0, "message": "...", "session_id": "...", "error": ""}
+  ],
+  "summary": {"total": 3, "success": 3, "failed": 0}
+}
+```
+
+**Features**:
+- Automatic topological sorting based on dependencies
+- Unlimited concurrency for independent tasks
+- Error isolation (failed tasks don't stop others)
+- Dependency blocking (dependent tasks skip if parent fails)
 
 ## Notes
 
