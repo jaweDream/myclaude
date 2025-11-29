@@ -185,26 +185,32 @@ For multiple independent or dependent tasks, use `--parallel` mode with delimite
 ```bash
 codex-wrapper --parallel - <<'EOF'
 ---TASK---
-id: T1
-workdir: .
+id: analyze_1732876800
+workdir: /home/user/project
 ---CONTENT---
 analyze requirements @spec.md
 ---TASK---
-id: T2
-dependencies: T1
+id: implement_1732876801
+workdir: /home/user/project
+dependencies: analyze_1732876800
 ---CONTENT---
-implement feature based on T1 analysis
+implement feature based on analyze_1732876800 analysis
 ---TASK---
-id: T3
+id: docs_1732876802
+workdir: /home/user/project/docs
 ---CONTENT---
-independent task runs in parallel with T1
+independent task runs in parallel with analyze_1732876800
 EOF
 ```
 
 **Delimiter Format**:
 - `---TASK---`: Starts a new task block
 - `id: <task-id>`: Required, unique task identifier
+  - Best practice: use `<feature>_<timestamp>` format (e.g., `auth_1732876800`, `api_test_1732876801`)
+  - Ensures uniqueness across runs and makes tasks traceable
 - `workdir: <path>`: Optional, working directory (default: `.`)
+  - Best practice: use absolute paths (e.g., `/home/user/project/backend`)
+  - Avoids ambiguity and ensures consistent behavior across environments
 - `dependencies: <id1>, <id2>`: Optional, comma-separated task IDs
 - `session_id: <uuid>`: Optional, resume a previous session
 - `---CONTENT---`: Separates metadata from task content
