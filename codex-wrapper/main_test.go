@@ -2,10 +2,19 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"os/signal"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"syscall"
 	"testing"
+	"time"
 )
 
 // Helper to reset test hooks
@@ -13,6 +22,9 @@ func resetTestHooks() {
 	stdinReader = os.Stdin
 	isTerminalFn = defaultIsTerminal
 	codexCommand = "codex"
+	buildCodexArgsFn = buildCodexArgs
+	commandContext = exec.CommandContext
+	jsonMarshal = json.Marshal
 }
 
 func TestParseArgs_NewMode(t *testing.T) {
@@ -192,6 +204,113 @@ func TestParseArgs_ResumeMode(t *testing.T) {
 	}
 }
 
+func TestParseParallelConfig_Success(t *testing.T) {
+	input := `---TASK---
+id: task-1
+dependencies: task-0
+---CONTENT---
+do something`
+
+	cfg, err := parseParallelConfig([]byte(input))
+	if err != nil {
+		t.Fatalf("parseParallelConfig() unexpected error: %v", err)
+	}
+
+	if len(cfg.Tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(cfg.Tasks))
+	}
+
+	task := cfg.Tasks[0]
+	if task.ID != "task-1" {
+		t.Errorf("task.ID = %q, want %q", task.ID, "task-1")
+	}
+	if task.Task != "do something" {
+		t.Errorf("task.Task = %q, want %q", task.Task, "do something")
+	}
+	if task.WorkDir != defaultWorkdir {
+		t.Errorf("task.WorkDir = %q, want %q", task.WorkDir, defaultWorkdir)
+	}
+	if len(task.Dependencies) != 1 || task.Dependencies[0] != "task-0" {
+		t.Errorf("dependencies = %v, want [task-0]", task.Dependencies)
+	}
+}
+
+func TestParseParallelConfig_InvalidFormat(t *testing.T) {
+	if _, err := parseParallelConfig([]byte("invalid format")); err == nil {
+		t.Fatalf("expected error for invalid format, got nil")
+	}
+}
+
+func TestParseParallelConfig_EmptyTasks(t *testing.T) {
+	input := `---TASK---
+id: empty
+---CONTENT---
+`
+	if _, err := parseParallelConfig([]byte(input)); err == nil {
+		t.Fatalf("expected error for empty tasks array, got nil")
+	}
+}
+
+func TestParseParallelConfig_MissingID(t *testing.T) {
+	input := `---TASK---
+---CONTENT---
+do something`
+	if _, err := parseParallelConfig([]byte(input)); err == nil {
+		t.Fatalf("expected error for missing id, got nil")
+	}
+}
+
+func TestParseParallelConfig_MissingTask(t *testing.T) {
+	input := `---TASK---
+id: task-1
+---CONTENT---
+`
+	if _, err := parseParallelConfig([]byte(input)); err == nil {
+		t.Fatalf("expected error for missing task, got nil")
+	}
+}
+
+func TestParseParallelConfig_DuplicateID(t *testing.T) {
+	input := `---TASK---
+id: dup
+---CONTENT---
+one
+---TASK---
+id: dup
+---CONTENT---
+two`
+	if _, err := parseParallelConfig([]byte(input)); err == nil {
+		t.Fatalf("expected error for duplicate id, got nil")
+	}
+}
+
+func TestParseParallelConfig_DelimiterFormat(t *testing.T) {
+	input := `---TASK---
+id: T1
+workdir: /tmp
+---CONTENT---
+echo 'test'
+---TASK---
+id: T2
+dependencies: T1
+---CONTENT---
+code with special chars: $var "quotes"`
+
+	cfg, err := parseParallelConfig([]byte(input))
+	if err != nil {
+		t.Fatalf("parseParallelConfig() error = %v", err)
+	}
+	if len(cfg.Tasks) != 2 {
+		t.Fatalf("expected 2 tasks, got %d", len(cfg.Tasks))
+	}
+	if cfg.Tasks[0].ID != "T1" || cfg.Tasks[0].Task != "echo 'test'" {
+		t.Errorf("task T1 mismatch")
+	}
+	if cfg.Tasks[1].ID != "T2" || len(cfg.Tasks[1].Dependencies) != 1 {
+		t.Errorf("task T2 mismatch")
+	}
+}
+
 func TestShouldUseStdin(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -203,6 +322,10 @@ func TestShouldUseStdin(t *testing.T) {
 		{"piped input", "analyze code", true, true},
 		{"contains newline", "line1\nline2", false, true},
 		{"contains backslash", "path\\to\\file", false, true},
+		{"contains double quote", `say "hi"`, false, true},
+		{"contains single quote", "it's tricky", false, true},
+		{"contains backtick", "use `code`", false, true},
+		{"contains dollar", "price is $5", false, true},
 		{"long task", strings.Repeat("a", 801), false, true},
 		{"exactly 800 chars", strings.Repeat("a", 800), false, false},
 	}
@@ -411,6 +534,21 @@ func TestParseJSONStream(t *testing.T) {
 	}
 }
 
+func TestParseJSONStreamWithWarn_InvalidLine(t *testing.T) {
+	var warnings []string
+	warnFn := func(msg string) {
+		warnings = append(warnings, msg)
+	}
+
+	message, threadID := parseJSONStreamWithWarn(strings.NewReader("not-json"), warnFn)
+	if message != "" || threadID != "" {
+		t.Fatalf("expected empty output for invalid json, got message=%q thread=%q", message, threadID)
+	}
+	if len(warnings) == 0 {
+		t.Fatalf("expected warning to be emitted")
+	}
+}
+
 func TestGetEnv(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -483,6 +621,34 @@ func TestMin(t *testing.T) {
 				t.Errorf("min(%d, %d) = %d, want %d", tt.a, tt.b, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestHello(t *testing.T) {
+	got := hello()
+	if got != "hello world" {
+		t.Fatalf("hello() = %q, want %q", got, "hello world")
+	}
+}
+
+func TestGreet(t *testing.T) {
+	got := greet("Linus")
+	if got != "hello Linus" {
+		t.Fatalf("greet() = %q, want %q", got, "hello Linus")
+	}
+}
+
+func TestFarewell(t *testing.T) {
+	got := farewell("Linus")
+	if got != "goodbye Linus" {
+		t.Fatalf("farewell() = %q, want %q", got, "goodbye Linus")
+	}
+}
+
+func TestFarewellEmpty(t *testing.T) {
+	got := farewell("")
+	if got != "goodbye " {
+		t.Fatalf("farewell(\"\") = %q, want %q", got, "goodbye ")
 	}
 }
 
@@ -596,82 +762,270 @@ func TestReadPipedTask(t *testing.T) {
 	}
 }
 
-// Tests for runCodexProcess with mock command
-func TestRunCodexProcess_CommandNotFound(t *testing.T) {
+// Tests for runCodexTask with mock command
+func TestRunCodexTask_CommandNotFound(t *testing.T) {
 	defer resetTestHooks()
 
 	codexCommand = "nonexistent-command-xyz"
+	buildCodexArgsFn = func(cfg *Config, targetArg string) []string { return []string{targetArg} }
 
-	_, _, exitCode := runCodexProcess([]string{"arg1"}, "task", false, 10)
+	res := runCodexTask(TaskSpec{Task: "task"}, false, 10)
 
-	if exitCode != 127 {
-		t.Errorf("runCodexProcess() exitCode = %d, want 127 for command not found", exitCode)
+	if res.ExitCode != 127 {
+		t.Errorf("runCodexTask() exitCode = %d, want 127 for command not found", res.ExitCode)
+	}
+	if res.Error == "" {
+		t.Errorf("runCodexTask() expected error message for missing command")
 	}
 }
 
-func TestRunCodexProcess_WithEcho(t *testing.T) {
+func TestRunCodexTask_StartError(t *testing.T) {
 	defer resetTestHooks()
 
-	// Use echo to simulate codex output
+	tmpFile, err := os.CreateTemp("", "start-error")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	codexCommand = tmpFile.Name()
+	buildCodexArgsFn = func(cfg *Config, targetArg string) []string { return []string{} }
+
+	res := runCodexTask(TaskSpec{Task: "task"}, false, 1)
+
+	if res.ExitCode != 1 {
+		t.Fatalf("runCodexTask() exitCode = %d, want 1 for start error", res.ExitCode)
+	}
+	if !strings.Contains(res.Error, "failed to start codex") {
+		t.Fatalf("runCodexTask() unexpected error: %s", res.Error)
+	}
+}
+
+func TestRunCodexTask_WithEcho(t *testing.T) {
+	defer resetTestHooks()
+
 	codexCommand = "echo"
+	buildCodexArgsFn = func(cfg *Config, targetArg string) []string { return []string{targetArg} }
 
 	jsonOutput := `{"type":"thread.started","thread_id":"test-session"}
 {"type":"item.completed","item":{"type":"agent_message","text":"Test output"}}`
 
-	message, threadID, exitCode := runCodexProcess([]string{jsonOutput}, "", false, 10)
+	res := runCodexTask(TaskSpec{Task: jsonOutput}, false, 10)
 
-	if exitCode != 0 {
-		t.Errorf("runCodexProcess() exitCode = %d, want 0", exitCode)
+	if res.ExitCode != 0 {
+		t.Errorf("runCodexTask() exitCode = %d, want 0", res.ExitCode)
 	}
-	if message != "Test output" {
-		t.Errorf("runCodexProcess() message = %q, want %q", message, "Test output")
+	if res.Message != "Test output" {
+		t.Errorf("runCodexTask() message = %q, want %q", res.Message, "Test output")
 	}
-	if threadID != "test-session" {
-		t.Errorf("runCodexProcess() threadID = %q, want %q", threadID, "test-session")
+	if res.SessionID != "test-session" {
+		t.Errorf("runCodexTask() sessionID = %q, want %q", res.SessionID, "test-session")
 	}
 }
 
-func TestRunCodexProcess_NoMessage(t *testing.T) {
+func TestRunCodexTask_NoMessage(t *testing.T) {
 	defer resetTestHooks()
 
 	codexCommand = "echo"
+	buildCodexArgsFn = func(cfg *Config, targetArg string) []string { return []string{targetArg} }
 
-	// Output without agent_message
 	jsonOutput := `{"type":"thread.started","thread_id":"test-session"}`
 
-	_, _, exitCode := runCodexProcess([]string{jsonOutput}, "", false, 10)
+	res := runCodexTask(TaskSpec{Task: jsonOutput}, false, 10)
 
-	if exitCode != 1 {
-		t.Errorf("runCodexProcess() exitCode = %d, want 1 for no message", exitCode)
+	if res.ExitCode != 1 {
+		t.Errorf("runCodexTask() exitCode = %d, want 1 for no message", res.ExitCode)
+	}
+	if res.Error == "" {
+		t.Errorf("runCodexTask() expected error for missing agent_message output")
 	}
 }
 
-func TestRunCodexProcess_WithStdin(t *testing.T) {
+func TestRunCodexTask_WithStdin(t *testing.T) {
 	defer resetTestHooks()
 
-	// Use cat to echo stdin back
 	codexCommand = "cat"
+	buildCodexArgsFn = func(cfg *Config, targetArg string) []string { return []string{} }
 
-	message, _, exitCode := runCodexProcess([]string{}, `{"type":"item.completed","item":{"type":"agent_message","text":"from stdin"}}`, true, 10)
+	jsonInput := `{"type":"item.completed","item":{"type":"agent_message","text":"from stdin"}}`
 
-	if exitCode != 0 {
-		t.Errorf("runCodexProcess() exitCode = %d, want 0", exitCode)
+	res := runCodexTask(TaskSpec{Task: jsonInput, UseStdin: true}, false, 10)
+
+	if res.ExitCode != 0 {
+		t.Errorf("runCodexTask() exitCode = %d, want 0", res.ExitCode)
 	}
-	if message != "from stdin" {
-		t.Errorf("runCodexProcess() message = %q, want %q", message, "from stdin")
+	if res.Message != "from stdin" {
+		t.Errorf("runCodexTask() message = %q, want %q", res.Message, "from stdin")
 	}
 }
 
-func TestRunCodexProcess_ExitError(t *testing.T) {
+func TestRunCodexTask_ExitError(t *testing.T) {
 	defer resetTestHooks()
 
-	// Use false command which exits with code 1
 	codexCommand = "false"
+	buildCodexArgsFn = func(cfg *Config, targetArg string) []string { return []string{} }
 
-	_, _, exitCode := runCodexProcess([]string{}, "", false, 10)
+	res := runCodexTask(TaskSpec{Task: "noop"}, false, 10)
 
-	if exitCode == 0 {
-		t.Errorf("runCodexProcess() exitCode = 0, want non-zero for failed command")
+	if res.ExitCode == 0 {
+		t.Errorf("runCodexTask() exitCode = 0, want non-zero for failed command")
+	}
+	if res.Error == "" {
+		t.Errorf("runCodexTask() expected error message for failed command")
+	}
+}
+
+func TestRunCodexTask_StdinPipeError(t *testing.T) {
+	defer resetTestHooks()
+
+	commandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		cmd := exec.CommandContext(ctx, "cat")
+		cmd.Stdin = os.Stdin
+		return cmd
+	}
+	buildCodexArgsFn = func(cfg *Config, targetArg string) []string { return []string{} }
+
+	res := runCodexTask(TaskSpec{Task: "data", UseStdin: true}, false, 1)
+	if res.ExitCode != 1 || !strings.Contains(res.Error, "stdin pipe") {
+		t.Fatalf("expected stdin pipe error, got %+v", res)
+	}
+}
+
+func TestRunCodexTask_StdoutPipeError(t *testing.T) {
+	defer resetTestHooks()
+
+	commandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		cmd := exec.CommandContext(ctx, "echo", "noop")
+		cmd.Stdout = os.Stdout
+		return cmd
+	}
+	buildCodexArgsFn = func(cfg *Config, targetArg string) []string { return []string{} }
+
+	res := runCodexTask(TaskSpec{Task: "noop"}, false, 1)
+	if res.ExitCode != 1 || !strings.Contains(res.Error, "stdout pipe") {
+		t.Fatalf("expected stdout pipe error, got %+v", res)
+	}
+}
+
+func TestRunCodexTask_Timeout(t *testing.T) {
+	defer resetTestHooks()
+
+	codexCommand = "sleep"
+	buildCodexArgsFn = func(cfg *Config, targetArg string) []string { return []string{"2"} }
+
+	res := runCodexTask(TaskSpec{Task: "ignored"}, false, 1)
+	if res.ExitCode != 124 || !strings.Contains(res.Error, "timeout") {
+		t.Fatalf("expected timeout exit, got %+v", res)
+	}
+}
+
+func TestRunCodexTask_SignalHandling(t *testing.T) {
+	defer resetTestHooks()
+
+	codexCommand = "sleep"
+	buildCodexArgsFn = func(cfg *Config, targetArg string) []string { return []string{"5"} }
+
+	resultCh := make(chan TaskResult, 1)
+	go func() {
+		resultCh <- runCodexTask(TaskSpec{Task: "ignored"}, false, 5)
+	}()
+
+	time.Sleep(200 * time.Millisecond)
+	syscall.Kill(os.Getpid(), syscall.SIGTERM)
+
+	res := <-resultCh
+	signal.Reset(syscall.SIGINT, syscall.SIGTERM)
+
+	if res.ExitCode == 0 {
+		t.Fatalf("expected non-zero exit after signal, got %+v", res)
+	}
+	if res.Error == "" {
+		t.Fatalf("expected error after signal, got %+v", res)
+	}
+}
+
+func TestSilentMode(t *testing.T) {
+	defer resetTestHooks()
+
+	jsonOutput := `{"type":"thread.started","thread_id":"silent-session"}
+{"type":"item.completed","item":{"type":"agent_message","text":"quiet"}}`
+
+	codexCommand = "echo"
+	buildCodexArgsFn = func(cfg *Config, targetArg string) []string { return []string{targetArg} }
+
+	capture := func(silent bool) string {
+		oldStderr := os.Stderr
+		r, w, _ := os.Pipe()
+		os.Stderr = w
+
+		res := runCodexTask(TaskSpec{Task: jsonOutput}, silent, 10)
+		if res.ExitCode != 0 {
+			t.Fatalf("runCodexTask() unexpected exitCode %d", res.ExitCode)
+		}
+
+		w.Close()
+		os.Stderr = oldStderr
+
+		var buf bytes.Buffer
+		io.Copy(&buf, r)
+		return buf.String()
+	}
+
+	verbose := capture(false)
+	quiet := capture(true)
+
+	if quiet != "" {
+		t.Fatalf("silent mode should suppress stderr, got: %q", quiet)
+	}
+	if !strings.Contains(verbose, "INFO: Starting codex") {
+		t.Fatalf("non-silent mode should log to stderr, got: %q", verbose)
+	}
+}
+
+func TestGenerateFinalOutput(t *testing.T) {
+	results := []TaskResult{
+		{TaskID: "a", ExitCode: 0, Message: "ok"},
+		{TaskID: "b", ExitCode: 1, Error: "boom"},
+		{TaskID: "c", ExitCode: 0},
+	}
+
+	out := generateFinalOutput(results)
+	if out == "" {
+		t.Fatalf("generateFinalOutput() returned empty string")
+	}
+
+	if !strings.Contains(out, "Total: 3") {
+		t.Errorf("output missing 'Total: 3'")
+	}
+	if !strings.Contains(out, "Success: 2") {
+		t.Errorf("output missing 'Success: 2'")
+	}
+	if !strings.Contains(out, "Failed: 1") {
+		t.Errorf("output missing 'Failed: 1'")
+	}
+	if !strings.Contains(out, "Task: a") {
+		t.Errorf("output missing task a")
+	}
+	if !strings.Contains(out, "Task: b") {
+		t.Errorf("output missing task b")
+	}
+	if !strings.Contains(out, "Status: SUCCESS") {
+		t.Errorf("output missing success status")
+	}
+	if !strings.Contains(out, "Status: FAILED") {
+		t.Errorf("output missing failed status")
+	}
+}
+
+func TestGenerateFinalOutput_MarshalError(t *testing.T) {
+	// This test is no longer relevant since we don't use JSON marshaling
+	// generateFinalOutput now uses string building
+	out := generateFinalOutput([]TaskResult{{TaskID: "x"}})
+	if out == "" {
+		t.Fatalf("generateFinalOutput() should not return empty string")
+	}
+	if !strings.Contains(out, "Task: x") {
+		t.Errorf("output should contain task x")
 	}
 }
 
@@ -756,5 +1110,360 @@ func TestRun_CommandFails(t *testing.T) {
 	exitCode := run()
 	if exitCode == 0 {
 		t.Errorf("run() with failing command returned 0, want non-zero")
+	}
+}
+
+func TestRun_CLI_Success(t *testing.T) {
+	defer resetTestHooks()
+
+	os.Args = []string{"codex-wrapper", "do-things"}
+	stdinReader = strings.NewReader("")
+	isTerminalFn = func() bool { return true }
+
+	codexCommand = "echo"
+	buildCodexArgsFn = func(cfg *Config, targetArg string) []string {
+		return []string{
+			`{"type":"thread.started","thread_id":"cli-session"}` + "\n" +
+				`{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}`,
+		}
+	}
+
+	var exitCode int
+	output := captureStdout(t, func() {
+		exitCode = run()
+	})
+
+	if exitCode != 0 {
+		t.Fatalf("run() exit=%d, want 0", exitCode)
+	}
+	if !strings.Contains(output, "ok") {
+		t.Fatalf("expected agent output, got %q", output)
+	}
+	if !strings.Contains(output, "SESSION_ID: cli-session") {
+		t.Fatalf("expected session id output, got %q", output)
+	}
+}
+
+func TestTopologicalSort_LinearChain(t *testing.T) {
+	tasks := []TaskSpec{
+		{ID: "a"},
+		{ID: "b", Dependencies: []string{"a"}},
+		{ID: "c", Dependencies: []string{"b"}},
+	}
+
+	layers, err := topologicalSort(tasks)
+	if err != nil {
+		t.Fatalf("topologicalSort() unexpected error: %v", err)
+	}
+
+	if len(layers) != 3 {
+		t.Fatalf("expected 3 layers, got %d", len(layers))
+	}
+
+	if layers[0][0].ID != "a" || layers[1][0].ID != "b" || layers[2][0].ID != "c" {
+		t.Fatalf("unexpected order: %+v", layers)
+	}
+}
+
+func TestTopologicalSort_Branching(t *testing.T) {
+	tasks := []TaskSpec{
+		{ID: "root"},
+		{ID: "left", Dependencies: []string{"root"}},
+		{ID: "right", Dependencies: []string{"root"}},
+		{ID: "leaf", Dependencies: []string{"left", "right"}},
+	}
+
+	layers, err := topologicalSort(tasks)
+	if err != nil {
+		t.Fatalf("topologicalSort() unexpected error: %v", err)
+	}
+
+	if len(layers) != 3 {
+		t.Fatalf("expected 3 layers, got %d", len(layers))
+	}
+
+	if len(layers[1]) != 2 {
+		t.Fatalf("expected branching layer size 2, got %d", len(layers[1]))
+	}
+}
+
+func TestTopologicalSort_ParallelTasks(t *testing.T) {
+	tasks := []TaskSpec{{ID: "a"}, {ID: "b"}, {ID: "c"}}
+
+	layers, err := topologicalSort(tasks)
+	if err != nil {
+		t.Fatalf("topologicalSort() unexpected error: %v", err)
+	}
+
+	if len(layers) != 1 {
+		t.Fatalf("expected single layer, got %d", len(layers))
+	}
+	if len(layers[0]) != 3 {
+		t.Fatalf("expected 3 tasks in layer, got %d", len(layers[0]))
+	}
+}
+
+func TestShouldSkipTask(t *testing.T) {
+	failed := map[string]TaskResult{
+		"a": {TaskID: "a", ExitCode: 1},
+		"b": {TaskID: "b", ExitCode: 2},
+	}
+
+	tests := []struct {
+		name           string
+		task           TaskSpec
+		skip           bool
+		reasonContains []string
+	}{
+		{"no deps", TaskSpec{ID: "c"}, false, nil},
+		{"missing deps not failed", TaskSpec{ID: "d", Dependencies: []string{"x"}}, false, nil},
+		{"single failed dep", TaskSpec{ID: "e", Dependencies: []string{"a"}}, true, []string{"a"}},
+		{"multiple failed deps", TaskSpec{ID: "f", Dependencies: []string{"a", "b"}}, true, []string{"a", "b"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			skip, reason := shouldSkipTask(tt.task, failed)
+
+			if skip != tt.skip {
+				t.Fatalf("shouldSkipTask(%s) skip=%v, want %v", tt.name, skip, tt.skip)
+			}
+			for _, expect := range tt.reasonContains {
+				if !strings.Contains(reason, expect) {
+					t.Fatalf("reason %q missing %q", reason, expect)
+				}
+			}
+		})
+	}
+}
+
+func TestTopologicalSort_CycleDetection(t *testing.T) {
+	tasks := []TaskSpec{
+		{ID: "a", Dependencies: []string{"b"}},
+		{ID: "b", Dependencies: []string{"a"}},
+	}
+
+	if _, err := topologicalSort(tasks); err == nil || !strings.Contains(err.Error(), "cycle detected") {
+		t.Fatalf("expected cycle error, got %v", err)
+	}
+}
+
+func TestTopologicalSort_IndirectCycle(t *testing.T) {
+	tasks := []TaskSpec{
+		{ID: "a", Dependencies: []string{"c"}},
+		{ID: "b", Dependencies: []string{"a"}},
+		{ID: "c", Dependencies: []string{"b"}},
+	}
+
+	if _, err := topologicalSort(tasks); err == nil || !strings.Contains(err.Error(), "cycle detected") {
+		t.Fatalf("expected indirect cycle error, got %v", err)
+	}
+}
+
+func TestTopologicalSort_MissingDependency(t *testing.T) {
+	tasks := []TaskSpec{
+		{ID: "a", Dependencies: []string{"missing"}},
+	}
+
+	if _, err := topologicalSort(tasks); err == nil || !strings.Contains(err.Error(), "dependency \"missing\" not found") {
+		t.Fatalf("expected missing dependency error, got %v", err)
+	}
+}
+
+func TestTopologicalSort_LargeGraph(t *testing.T) {
+	const count = 1000
+	tasks := make([]TaskSpec, count)
+	for i := 0; i < count; i++ {
+		id := fmt.Sprintf("task-%d", i)
+		if i == 0 {
+			tasks[i] = TaskSpec{ID: id}
+			continue
+		}
+		prev := fmt.Sprintf("task-%d", i-1)
+		tasks[i] = TaskSpec{ID: id, Dependencies: []string{prev}}
+	}
+
+	layers, err := topologicalSort(tasks)
+	if err != nil {
+		t.Fatalf("topologicalSort() unexpected error: %v", err)
+	}
+
+	if len(layers) != count {
+		t.Fatalf("expected %d layers, got %d", count, len(layers))
+	}
+}
+
+func TestExecuteConcurrent_ParallelExecution(t *testing.T) {
+	orig := runCodexTaskFn
+	defer func() { runCodexTaskFn = orig }()
+
+	var maxParallel int64
+	var current int64
+
+	runCodexTaskFn = func(task TaskSpec, timeout int) TaskResult {
+		cur := atomic.AddInt64(&current, 1)
+		for {
+			prev := atomic.LoadInt64(&maxParallel)
+			if cur <= prev || atomic.CompareAndSwapInt64(&maxParallel, prev, cur) {
+				break
+			}
+		}
+		time.Sleep(150 * time.Millisecond)
+		atomic.AddInt64(&current, -1)
+		return TaskResult{TaskID: task.ID}
+	}
+
+	start := time.Now()
+	layers := [][]TaskSpec{{{ID: "a"}, {ID: "b"}, {ID: "c"}}}
+	results := executeConcurrent(layers, 10)
+	elapsed := time.Since(start)
+
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(results))
+	}
+
+	if elapsed >= 400*time.Millisecond {
+		t.Fatalf("expected concurrent execution, took %v", elapsed)
+	}
+	if maxParallel < 2 {
+		t.Fatalf("expected parallelism >=2, got %d", maxParallel)
+	}
+}
+
+func TestExecuteConcurrent_LayerOrdering(t *testing.T) {
+	orig := runCodexTaskFn
+	defer func() { runCodexTaskFn = orig }()
+
+	var mu sync.Mutex
+	var order []string
+
+	runCodexTaskFn = func(task TaskSpec, timeout int) TaskResult {
+		mu.Lock()
+		order = append(order, task.ID)
+		mu.Unlock()
+		return TaskResult{TaskID: task.ID}
+	}
+
+	layers := [][]TaskSpec{{{ID: "first-1"}, {ID: "first-2"}}, {{ID: "second"}}}
+	executeConcurrent(layers, 10)
+
+	if len(order) != 3 {
+		t.Fatalf("expected 3 tasks recorded, got %d", len(order))
+	}
+
+	if order[0] != "first-1" && order[0] != "first-2" {
+		t.Fatalf("first task should come from first layer, got %s", order[0])
+	}
+	if order[2] != "second" {
+		t.Fatalf("last task should be from second layer, got %s", order[2])
+	}
+}
+
+func TestExecuteConcurrent_ErrorIsolation(t *testing.T) {
+	orig := runCodexTaskFn
+	defer func() { runCodexTaskFn = orig }()
+
+	runCodexTaskFn = func(task TaskSpec, timeout int) TaskResult {
+		if task.ID == "fail" {
+			return TaskResult{TaskID: task.ID, ExitCode: 2, Error: "boom"}
+		}
+		return TaskResult{TaskID: task.ID, ExitCode: 0}
+	}
+
+	layers := [][]TaskSpec{{{ID: "ok"}, {ID: "fail"}}, {{ID: "after"}}}
+	results := executeConcurrent(layers, 10)
+
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(results))
+	}
+
+	var failed, succeeded bool
+	for _, res := range results {
+		if res.TaskID == "fail" && res.ExitCode == 2 {
+			failed = true
+		}
+		if res.TaskID == "after" && res.ExitCode == 0 {
+			succeeded = true
+		}
+	}
+
+	if !failed || !succeeded {
+		t.Fatalf("expected failure isolation, got results: %+v", results)
+	}
+}
+
+func TestExecuteConcurrent_PanicRecovered(t *testing.T) {
+	orig := runCodexTaskFn
+	defer func() { runCodexTaskFn = orig }()
+
+	runCodexTaskFn = func(task TaskSpec, timeout int) TaskResult {
+		panic("boom")
+	}
+
+	results := executeConcurrent([][]TaskSpec{{{ID: "panic"}}}, 10)
+
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].Error == "" || results[0].ExitCode == 0 {
+		t.Fatalf("panic should be captured, got %+v", results[0])
+	}
+}
+
+func TestExecuteConcurrent_LargeFanout(t *testing.T) {
+	orig := runCodexTaskFn
+	defer func() { runCodexTaskFn = orig }()
+
+	runCodexTaskFn = func(task TaskSpec, timeout int) TaskResult {
+		return TaskResult{TaskID: task.ID}
+	}
+
+	layer := make([]TaskSpec, 0, 1200)
+	for i := 0; i < 1200; i++ {
+		layer = append(layer, TaskSpec{ID: fmt.Sprintf("id-%d", i)})
+	}
+
+	results := executeConcurrent([][]TaskSpec{layer}, 10)
+
+	if len(results) != 1200 {
+		t.Fatalf("expected 1200 results, got %d", len(results))
+	}
+}
+
+func TestRun_ParallelFlag(t *testing.T) {
+	oldArgs := os.Args
+	defer func() { os.Args = oldArgs }()
+
+	os.Args = []string{"codex-wrapper", "--parallel"}
+
+	jsonInput := `---TASK---
+id: T1
+---CONTENT---
+test`
+	stdinReader = strings.NewReader(jsonInput)
+	defer func() { stdinReader = os.Stdin }()
+
+	runCodexTaskFn = func(task TaskSpec, timeout int) TaskResult {
+		return TaskResult{
+			TaskID:   task.ID,
+			ExitCode: 0,
+			Message:  "test output",
+		}
+	}
+	defer func() {
+		runCodexTaskFn = func(task TaskSpec, timeout int) TaskResult {
+			if task.WorkDir == "" {
+				task.WorkDir = defaultWorkdir
+			}
+			if task.Mode == "" {
+				task.Mode = "new"
+			}
+			return runCodexTask(task, true, timeout)
+		}
+	}()
+
+	exitCode := run()
+	if exitCode != 0 {
+		t.Errorf("expected exit code 0, got %d", exitCode)
 	}
 }

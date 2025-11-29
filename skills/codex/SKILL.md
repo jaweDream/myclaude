@@ -178,16 +178,77 @@ Add proper escaping and handle $variables correctly.
 EOF
 ```
 
-### Large Task Protocol
+### Parallel Execution
 
-- For every large task, first produce a canonical task list that enumerates the Task ID, description, file/directory scope, dependencies, test commands, and the expected Codex Bash invocation.
-- Tasks without dependencies should be executed concurrently via multiple foreground Bash calls (you can keep separate terminal windows) and each run must log start/end times plus any shared resource usage.
-- Reuse context aggressively (such as @spec.md or prior analysis output), and after concurrent execution finishes, reconcile against the task list to report which items completed and which slipped.
+For multiple independent or dependent tasks, use `--parallel` mode with delimiter format:
 
-| ID | Description | Scope | Dependencies | Tests | Command |
-| --- | --- | --- | --- | --- | --- |
-| T1 | Review @spec.md to extract requirements | docs/, @spec.md | None | None | `codex-wrapper - <<'EOF'`<br/>`analyze requirements @spec.md`<br/>`EOF` |
-| T2 | Implement the module and add test cases | src/module | T1 | npm test -- --runInBand | `codex-wrapper - <<'EOF'`<br/>`implement and test @src/module`<br/>`EOF` |
+```bash
+codex-wrapper --parallel - <<'EOF'
+---TASK---
+id: analyze_1732876800
+workdir: /home/user/project
+---CONTENT---
+analyze requirements @spec.md
+---TASK---
+id: implement_1732876801
+workdir: /home/user/project
+dependencies: analyze_1732876800
+---CONTENT---
+implement feature based on analyze_1732876800 analysis
+---TASK---
+id: docs_1732876802
+workdir: /home/user/project/docs
+---CONTENT---
+independent task runs in parallel with analyze_1732876800
+EOF
+```
+
+**Delimiter Format**:
+- `---TASK---`: Starts a new task block
+- `id: <task-id>`: Required, unique task identifier
+  - Best practice: use `<feature>_<timestamp>` format (e.g., `auth_1732876800`, `api_test_1732876801`)
+  - Ensures uniqueness across runs and makes tasks traceable
+- `workdir: <path>`: Optional, working directory (default: `.`)
+  - Best practice: use absolute paths (e.g., `/home/user/project/backend`)
+  - Avoids ambiguity and ensures consistent behavior across environments
+- `dependencies: <id1>, <id2>`: Optional, comma-separated task IDs
+- `session_id: <uuid>`: Optional, resume a previous session
+- `---CONTENT---`: Separates metadata from task content
+- Task content: Any text, code, special characters (no escaping needed)
+
+**Resume Failed Tasks**:
+```bash
+# Use session_id from previous output to resume
+codex-wrapper --parallel - <<'EOF'
+---TASK---
+id: T2
+session_id: 019xxx-previous-session-id
+---CONTENT---
+fix the previous error and retry
+EOF
+```
+
+**Output**: Human-readable text format
+```
+=== Parallel Execution Summary ===
+Total: 3 | Success: 2 | Failed: 1
+
+--- Task: T1 ---
+Status: SUCCESS
+Session: 019xxx
+
+Task output message...
+
+--- Task: T2 ---
+Status: FAILED (exit code 1)
+Error: some error message
+```
+
+**Features**:
+- Automatic topological sorting based on dependencies
+- Unlimited concurrency for independent tasks
+- Error isolation (failed tasks don't stop others)
+- Dependency blocking (dependent tasks skip if parent fails)
 
 ## Notes
 
