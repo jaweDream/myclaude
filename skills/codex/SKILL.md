@@ -182,24 +182,48 @@ EOF
 
 For multiple independent or dependent tasks, use `--parallel` mode with delimiter format:
 
+**Typical Workflow (analyze → implement → test, chained in a single parallel call)**:
 ```bash
 codex-wrapper --parallel - <<'EOF'
 ---TASK---
 id: analyze_1732876800
 workdir: /home/user/project
 ---CONTENT---
-analyze requirements @spec.md
+analyze @spec.md and summarize API and UI requirements
 ---TASK---
 id: implement_1732876801
 workdir: /home/user/project
 dependencies: analyze_1732876800
 ---CONTENT---
-implement feature based on analyze_1732876800 analysis
+implement features from analyze_1732876800 summary in backend @services and frontend @ui
 ---TASK---
-id: docs_1732876802
-workdir: /home/user/project/docs
+id: test_1732876802
+workdir: /home/user/project
+dependencies: implement_1732876801
 ---CONTENT---
-independent task runs in parallel with analyze_1732876800
+add and run regression tests covering the new endpoints and UI flows
+EOF
+```
+A single `codex-wrapper --parallel` call schedules all three stages concurrently, using `dependencies` to enforce sequential ordering without multiple invocations.
+
+```bash
+codex-wrapper --parallel - <<'EOF'
+---TASK---
+id: backend_1732876800
+workdir: /home/user/project/backend
+---CONTENT---
+implement /api/orders endpoints with validation and pagination
+---TASK---
+id: frontend_1732876801
+workdir: /home/user/project/frontend
+---CONTENT---
+build Orders page consuming /api/orders with loading/error states
+---TASK---
+id: tests_1732876802
+workdir: /home/user/project/tests
+dependencies: backend_1732876800, frontend_1732876801
+---CONTENT---
+run API contract tests and UI smoke tests (waits for backend+frontend)
 EOF
 ```
 
@@ -215,6 +239,12 @@ EOF
 - `session_id: <uuid>`: Optional, resume a previous session
 - `---CONTENT---`: Separates metadata from task content
 - Task content: Any text, code, special characters (no escaping needed)
+
+**Dependencies Best Practices**
+
+- Avoid multiple invocations: Place "analyze then implement" in a single `codex-wrapper --parallel` call, chaining them via `dependencies`, rather than running analysis first and then launching implementation separately.
+- Naming convention: Use `<action>_<timestamp>` format (e.g., `analyze_1732876800`, `implement_1732876801`), where action names map to features/stages and timestamps ensure uniqueness and sortability.
+- Dependency chain design: Keep chains short; only add dependencies for tasks that truly require ordering, let others run in parallel, avoiding over-serialization that reduces throughput.
 
 **Resume Failed Tasks**:
 ```bash
