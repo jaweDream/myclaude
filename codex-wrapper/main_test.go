@@ -960,9 +960,11 @@ func TestRun_ExplicitStdinReadError(t *testing.T) {
 	if !strings.Contains(logOutput, "Failed to read stdin: broken stdin") {
 		t.Fatalf("log missing read error entry, got %q", logOutput)
 	}
-	if _, err := os.Stat(logPath); !os.IsNotExist(err) {
-		t.Fatalf("log file still exists after run, err=%v", err)
+	// Log file is kept for debugging after run completes
+	if _, err := os.Stat(logPath); os.IsNotExist(err) {
+		t.Fatalf("log file should exist after run for debugging")
 	}
+	defer os.Remove(logPath)
 }
 
 func TestRun_CommandFails(t *testing.T) {
@@ -1057,9 +1059,11 @@ func TestRun_PipedTaskReadError(t *testing.T) {
 	if !strings.Contains(logOutput, "Failed to read piped stdin: read stdin: pipe failure") {
 		t.Fatalf("log missing piped read error entry, got %q", logOutput)
 	}
-	if _, err := os.Stat(logPath); !os.IsNotExist(err) {
-		t.Fatalf("log file still exists after run, err=%v", err)
+	// Log file is kept for debugging after run completes
+	if _, err := os.Stat(logPath); os.IsNotExist(err) {
+		t.Fatalf("log file should exist after run for debugging")
 	}
+	defer os.Remove(logPath)
 }
 
 func TestRun_PipedTaskSuccess(t *testing.T) {
@@ -1117,9 +1121,11 @@ func TestRun_LoggerLifecycle(t *testing.T) {
 	if !fileExisted {
 		t.Fatalf("log file was not present during run")
 	}
-	if _, err := os.Stat(logPath); !os.IsNotExist(err) {
-		t.Fatalf("log file still exists after run, err=%v", err)
+	// Log file is kept for debugging after run completes
+	if _, err := os.Stat(logPath); os.IsNotExist(err) {
+		t.Fatalf("log file should exist after run for debugging")
 	}
+	defer os.Remove(logPath)
 }
 
 func TestRun_LoggerRemovedOnSignal(t *testing.T) {
@@ -1169,9 +1175,11 @@ printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"l
 	if exitCode != 130 {
 		t.Fatalf("run() exit code = %d, want 130 on signal", exitCode)
 	}
-	if _, err := os.Stat(logPath); !os.IsNotExist(err) {
-		t.Fatalf("log file still exists after signal exit, err=%v", err)
+	// Log file is kept for debugging even after signal exit
+	if _, err := os.Stat(logPath); os.IsNotExist(err) {
+		t.Fatalf("log file should exist after signal exit for debugging")
 	}
+	defer os.Remove(logPath)
 }
 
 func TestRun_CleanupHookAlwaysCalled(t *testing.T) {

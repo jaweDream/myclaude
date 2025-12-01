@@ -70,7 +70,8 @@ func (l *Logger) Debug(msg string) { l.log("DEBUG", msg) }
 // Error logs at ERROR level.
 func (l *Logger) Error(msg string) { l.log("ERROR", msg) }
 
-// Close stops the worker, syncs and removes the log file.
+// Close stops the worker and syncs the log file.
+// The log file is NOT removed, allowing inspection after program exit.
 // It is safe to call multiple times.
 func (l *Logger) Close() error {
 	if l == nil {
@@ -94,9 +95,8 @@ func (l *Logger) Close() error {
 			closeErr = err
 		}
 
-		if err := os.Remove(l.path); err != nil && !os.IsNotExist(err) && closeErr == nil {
-			closeErr = err
-		}
+		// Log file is kept for debugging - NOT removed
+		// Users can manually clean up /tmp/codex-wrapper-*.log files
 	})
 
 	return closeErr

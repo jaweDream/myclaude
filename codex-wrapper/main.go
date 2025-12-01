@@ -19,10 +19,11 @@ import (
 )
 
 const (
-	version        = "1.0.0"
-	defaultWorkdir = "."
-	defaultTimeout = 7200 // seconds
-	forceKillDelay = 5    // seconds
+	version           = "1.0.0"
+	defaultWorkdir    = "."
+	defaultTimeout    = 7200 // seconds
+	forceKillDelay    = 5    // seconds
+	codexLogLineLimit = 1000
 )
 
 // Test hooks for dependency injection
@@ -72,6 +73,10 @@ func run() int {
 	setLogger(logger)
 
 	defer func() {
+		// Ensure all pending logs are written before closing
+		if logger := activeLogger(); logger != nil {
+			logger.Flush()
+		}
 		if err := closeLogger(); err != nil {
 			fmt.Fprintf(os.Stderr, "ERROR: failed to close logger: %v\n", err)
 		}
@@ -284,7 +289,15 @@ func runCodexProcess(parentCtx context.Context, codexArgs []string, taskText str
 	defer cancel()
 
 	cmd := exec.Command(codexCommand, codexArgs...)
-	cmd.Stderr = os.Stderr
+
+	// Create log writers for stdout and stderr
+	stdoutLogger := newLogWriter("CODEX_STDOUT: ", codexLogLineLimit)
+	stderrLogger := newLogWriter("CODEX_STDERR: ", codexLogLineLimit)
+	defer stdoutLogger.Flush()
+	defer stderrLogger.Flush()
+
+	// Stderr goes to both os.Stderr and logger
+	cmd.Stderr = io.MultiWriter(os.Stderr, stderrLogger)
 
 	// Setup stdin if needed
 	var stdinPipe io.WriteCloser
@@ -303,6 +316,9 @@ func runCodexProcess(parentCtx context.Context, codexArgs []string, taskText str
 		logError("Failed to create stdout pipe: " + err.Error())
 		return "", "", 1
 	}
+
+	// Tee stdout to logger while parsing JSON
+	stdoutReader := io.TeeReader(stdout, stdoutLogger)
 
 	logInfo(fmt.Sprintf("Starting codex with args: codex %s...", strings.Join(codexArgs[:min(5, len(codexArgs))], " ")))
 
@@ -336,7 +352,7 @@ func runCodexProcess(parentCtx context.Context, codexArgs []string, taskText str
 
 	parseCh := make(chan parseResult, 1)
 	go func() {
-		msg, tid := parseJSONStream(stdout)
+		msg, tid := parseJSONStream(stdoutReader)
 		parseCh <- parseResult{message: msg, threadID: tid}
 	}()
 
@@ -411,8 +427,10 @@ func terminateProcess(cmd *exec.Cmd) *time.Timer {
 }
 
 func parseJSONStream(r io.Reader) (message, threadID string) {
+	logInfo("parseJSONStream: starting to decode stdout stream")
 	reader := bufio.NewReaderSize(r, 64*1024)
 	decoder := json.NewDecoder(reader)
+	totalEvents := 0
 
 	for {
 		var event JSONEvent
@@ -437,18 +455,39 @@ func parseJSONStream(r io.Reader) (message, threadID string) {
 			continue
 		}
 
+		totalEvents++
+		var details []string
+		if event.ThreadID != "" {
+			details = append(details, fmt.Sprintf("thread_id=%s", event.ThreadID))
+		}
+		if event.Item != nil && event.Item.Type != "" {
+			details = append(details, fmt.Sprintf("item_type=%s", event.Item.Type))
+		}
+		if len(details) > 0 {
+			logInfo(fmt.Sprintf("Parsed event #%d type=%s (%s)", totalEvents, event.Type, strings.Join(details, ", ")))
+		} else {
+			logInfo(fmt.Sprintf("Parsed event #%d type=%s", totalEvents, event.Type))
+		}
+
 		switch event.Type {
 		case "thread.started":
 			threadID = event.ThreadID
+			logInfo(fmt.Sprintf("thread.started event thread_id=%s", threadID))
 		case "item.completed":
-			if event.Item != nil && event.Item.Type == "agent_message" {
-				if text := normalizeText(event.Item.Text); text != "" {
-					message = text
-				}
+			var itemType string
+			var normalized string
+			if event.Item != nil {
+				itemType = event.Item.Type
+				normalized = normalizeText(event.Item.Text)
+			}
+			logInfo(fmt.Sprintf("item.completed event item_type=%s message_len=%d", itemType, len(normalized)))
+			if event.Item != nil && event.Item.Type == "agent_message" && normalized != "" {
+				message = normalized
 			}
 		}
 	}
 
+	logInfo(fmt.Sprintf("parseJSONStream completed: events=%d, message_len=%d, thread_id_found=%t", totalEvents, len(message), threadID != ""))
 	return message, threadID
 }
 
@@ -531,6 +570,64 @@ func getEnv(key, defaultValue string) string {
 		return val
 	}
 	return defaultValue
+}
+
+type logWriter struct {
+	prefix string
+	maxLen int
+	buf    bytes.Buffer
+}
+
+func newLogWriter(prefix string, maxLen int) *logWriter {
+	if maxLen <= 0 {
+		maxLen = codexLogLineLimit
+	}
+	return &logWriter{prefix: prefix, maxLen: maxLen}
+}
+
+func (lw *logWriter) Write(p []byte) (int, error) {
+	if lw == nil {
+		return len(p), nil
+	}
+	total := len(p)
+	for len(p) > 0 {
+		if idx := bytes.IndexByte(p, '\n'); idx >= 0 {
+			lw.buf.Write(p[:idx])
+			lw.logLine(true)
+			p = p[idx+1:]
+			continue
+		}
+		lw.buf.Write(p)
+		break
+	}
+	return total, nil
+}
+
+func (lw *logWriter) Flush() {
+	if lw == nil || lw.buf.Len() == 0 {
+		return
+	}
+	lw.logLine(false)
+}
+
+func (lw *logWriter) logLine(force bool) {
+	if lw == nil {
+		return
+	}
+	line := lw.buf.String()
+	lw.buf.Reset()
+	if line == "" && !force {
+		return
+	}
+	if lw.maxLen > 0 && len(line) > lw.maxLen {
+		cutoff := lw.maxLen
+		if cutoff > 3 {
+			line = line[:cutoff-3] + "..."
+		} else {
+			line = line[:cutoff]
+		}
+	}
+	logInfo(lw.prefix + line)
 }
 
 func truncate(s string, maxLen int) string {

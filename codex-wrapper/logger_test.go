@@ -75,13 +75,19 @@ func TestLoggerCloseRemovesFileAndStopsWorker(t *testing.T) {
 	logger.Info("before close")
 	logger.Flush()
 
+	logPath := logger.Path()
+
 	if err := logger.Close(); err != nil {
 		t.Fatalf("Close() returned error: %v", err)
 	}
 
-	if _, err := os.Stat(logger.Path()); !os.IsNotExist(err) {
-		t.Fatalf("log file still exists after Close, err=%v", err)
+	// After recent changes, log file is kept for debugging - NOT removed
+	if _, err := os.Stat(logPath); os.IsNotExist(err) {
+		t.Fatalf("log file should exist after Close for debugging, but got IsNotExist")
 	}
+
+	// Clean up manually for test
+	defer os.Remove(logPath)
 
 	done := make(chan struct{})
 	go func() {
