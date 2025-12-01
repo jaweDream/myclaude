@@ -207,15 +207,15 @@ echo "---TASK---..." | codex-wrapper --parallel
 
 **Incorrect (will trigger shell parsing errors):**
 ```bash
-# ❌ Wrong: no extra args allowed after --parallel
+# Bad: no extra args allowed after --parallel
 codex-wrapper --parallel - /path/to/dir <<'EOF'
 ...
 EOF
 
-# ❌ Wrong: --parallel does not take a task argument
+# Bad: --parallel does not take a task argument
 codex-wrapper --parallel "task description"
 
-# ❌ Wrong: workdir must live inside the task config
+# Bad: workdir must live inside the task config
 codex-wrapper --parallel /path/to/dir < tasks.txt
 ```
 
