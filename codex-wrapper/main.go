@@ -363,6 +363,14 @@ func run() int {
 			printHelp()
 			return 0
 		case "--parallel":
+			if len(os.Args) > 2 {
+				fmt.Fprintln(os.Stderr, "ERROR: --parallel reads its task configuration from stdin and does not accept additional arguments.")
+				fmt.Fprintln(os.Stderr, "Usage examples:")
+				fmt.Fprintln(os.Stderr, "  codex-wrapper --parallel < tasks.txt")
+				fmt.Fprintln(os.Stderr, "  echo '...' | codex-wrapper --parallel")
+				fmt.Fprintln(os.Stderr, "  codex-wrapper --parallel <<'EOF'")
+				return 1
+			}
 			// Parallel mode: read task config from stdin
 			data, err := io.ReadAll(stdinReader)
 			if err != nil {
@@ -888,8 +896,14 @@ Usage:
     codex-wrapper - [workdir]              Read task from stdin
     codex-wrapper resume <session_id> "task" [workdir]
     codex-wrapper resume <session_id> - [workdir]
+    codex-wrapper --parallel               Run tasks in parallel (config from stdin)
     codex-wrapper --version
     codex-wrapper --help
+
+Parallel mode examples:
+    codex-wrapper --parallel < tasks.txt
+    echo '...' | codex-wrapper --parallel
+    codex-wrapper --parallel <<'EOF'
 
 Environment Variables:
     CODEX_TIMEOUT  Timeout in milliseconds (default: 7200000)

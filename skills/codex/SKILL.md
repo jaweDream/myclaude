@@ -180,11 +180,50 @@ EOF
 
 ### Parallel Execution
 
+> Important:
+> - `--parallel` only reads task definitions from stdin.
+> - It does not accept extra command-line arguments (no inline `workdir`, `task`, or other params).
+> - Put all task metadata and content in stdin; nothing belongs after `--parallel` on the command line.
+
+**Correct vs Incorrect Usage**
+
+**Correct:**
+```bash
+# Option 1: file redirection
+codex-wrapper --parallel < tasks.txt
+
+# Option 2: heredoc (recommended for multiple tasks)
+codex-wrapper --parallel <<'EOF'
+---TASK---
+id: task1
+workdir: /path/to/dir
+---CONTENT---
+task content
+EOF
+
+# Option 3: pipe
+echo "---TASK---..." | codex-wrapper --parallel
+```
+
+**Incorrect (will trigger shell parsing errors):**
+```bash
+# ❌ Wrong: no extra args allowed after --parallel
+codex-wrapper --parallel - /path/to/dir <<'EOF'
+...
+EOF
+
+# ❌ Wrong: --parallel does not take a task argument
+codex-wrapper --parallel "task description"
+
+# ❌ Wrong: workdir must live inside the task config
+codex-wrapper --parallel /path/to/dir < tasks.txt
+```
+
 For multiple independent or dependent tasks, use `--parallel` mode with delimiter format:
 
 **Typical Workflow (analyze → implement → test, chained in a single parallel call)**:
 ```bash
-codex-wrapper --parallel - <<'EOF'
+codex-wrapper --parallel <<'EOF'
 ---TASK---
 id: analyze_1732876800
 workdir: /home/user/project
@@ -207,7 +246,7 @@ EOF
 A single `codex-wrapper --parallel` call schedules all three stages concurrently, using `dependencies` to enforce sequential ordering without multiple invocations.
 
 ```bash
-codex-wrapper --parallel - <<'EOF'
+codex-wrapper --parallel <<'EOF'
 ---TASK---
 id: backend_1732876800
 workdir: /home/user/project/backend
@@ -235,6 +274,8 @@ EOF
 - `workdir: <path>`: Optional, working directory (default: `.`)
   - Best practice: use absolute paths (e.g., `/home/user/project/backend`)
   - Avoids ambiguity and ensures consistent behavior across environments
+  - Must be specified inside each task block; do not pass `workdir` as a CLI argument to `--parallel`
+  - Each task can set its own `workdir` when different directories are needed
 - `dependencies: <id1>, <id2>`: Optional, comma-separated task IDs
 - `session_id: <uuid>`: Optional, resume a previous session
 - `---CONTENT---`: Separates metadata from task content
@@ -249,7 +290,7 @@ EOF
 **Resume Failed Tasks**:
 ```bash
 # Use session_id from previous output to resume
-codex-wrapper --parallel - <<'EOF'
+codex-wrapper --parallel <<'EOF'
 ---TASK---
 id: T2
 session_id: 019xxx-previous-session-id
