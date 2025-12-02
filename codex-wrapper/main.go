@@ -360,6 +360,19 @@ func main() {
 
 // run is the main logic, returns exit code for testability
 func run() (exitCode int) {
+	// Handle --version and --help first (no logger needed)
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "--version", "-v":
+			fmt.Printf("codex-wrapper version %s\n", version)
+			return 0
+		case "--help", "-h":
+			printHelp()
+			return 0
+		}
+	}
+
+	// Initialize logger for all other commands
 	logger, err := NewLogger()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ERROR: failed to initialize logger: %v\n", err)
@@ -375,25 +388,18 @@ func run() (exitCode int) {
 		if err := closeLogger(); err != nil {
 			fmt.Fprintf(os.Stderr, "ERROR: failed to close logger: %v\n", err)
 		}
-		if exitCode == 0 && logger != nil {
+		// Always remove log file after completion
+		if logger != nil {
 			if err := logger.RemoveLogFile(); err != nil && !os.IsNotExist(err) {
-				fmt.Fprintf(os.Stderr, "ERROR: failed to remove logger file: %v\n", err)
+				// Silently ignore removal errors
 			}
-		} else if exitCode != 0 && logger != nil {
-			fmt.Fprintf(os.Stderr, "Log file retained at: %s\n", logger.Path())
 		}
 	}()
 	defer runCleanupHook()
 
-	// Handle --version and --help first
+	// Handle remaining commands
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
-		case "--version", "-v":
-			fmt.Printf("codex-wrapper version %s\n", version)
-			return 0
-		case "--help", "-h":
-			printHelp()
-			return 0
 		case "--parallel":
 			if len(os.Args) > 2 {
 				fmt.Fprintln(os.Stderr, "ERROR: --parallel reads its task configuration from stdin and does not accept additional arguments.")
@@ -437,6 +443,12 @@ func run() (exitCode int) {
 	}
 
 	logInfo("Script started")
+
+	// Print startup information to stderr
+	fmt.Fprintf(os.Stderr, "[codex-wrapper]\n")
+	fmt.Fprintf(os.Stderr, "  Command: %s\n", strings.Join(os.Args, " "))
+	fmt.Fprintf(os.Stderr, "  PID: %d\n", os.Getpid())
+	fmt.Fprintf(os.Stderr, "  Log: %s\n", logger.Path())
 
 	cfg, err := parseArgs()
 	if err != nil {
@@ -1210,24 +1222,18 @@ func farewell(name string) string {
 }
 
 func logInfo(msg string) {
-	fmt.Fprintf(os.Stderr, "INFO: %s\n", msg)
-
 	if logger := activeLogger(); logger != nil {
 		logger.Info(msg)
 	}
 }
 
 func logWarn(msg string) {
-	fmt.Fprintf(os.Stderr, "WARN: %s\n", msg)
-
 	if logger := activeLogger(); logger != nil {
 		logger.Warn(msg)
 	}
 }
 
 func logError(msg string) {
-	fmt.Fprintf(os.Stderr, "ERROR: %s\n", msg)
-
 	if logger := activeLogger(); logger != nil {
 		logger.Error(msg)
 	}

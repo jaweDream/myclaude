@@ -19,13 +19,12 @@ type Logger struct {
 	file      *os.File
 	writer    *bufio.Writer
 	ch        chan logEntry
-	flushReq  chan struct{}
+	flushReq  chan chan struct{}
 	done      chan struct{}
 	closed    atomic.Bool
 	closeOnce sync.Once
 	workerWG  sync.WaitGroup
 	pendingWG sync.WaitGroup
-	flushMu   sync.Mutex
 }
 
 type logEntry struct {
@@ -60,7 +59,7 @@ func NewLoggerWithSuffix(suffix string) (*Logger, error) {
 		file:     f,
 		writer:   bufio.NewWriterSize(f, 4096),
 		ch:       make(chan logEntry, 1000),
-		flushReq: make(chan struct{}, 1),
+		flushReq: make(chan chan struct{}, 1),
 		done:     make(chan struct{}),
 	}
 
@@ -174,16 +173,10 @@ func (l *Logger) Flush() {
 	}
 
 	// Trigger writer flush
+	flushDone := make(chan struct{})
 	select {
-	case l.flushReq <- struct{}{}:
-		// Wait for flush to complete (with mutex)
-		flushDone := make(chan struct{})
-		go func() {
-			l.flushMu.Lock()
-			l.flushMu.Unlock()
-			close(flushDone)
-		}()
-
+	case l.flushReq <- flushDone:
+		// Wait for flush to complete
 		select {
 		case <-flushDone:
 			// Flush completed
@@ -210,11 +203,9 @@ func (l *Logger) log(level, msg string) {
 
 	select {
 	case l.ch <- entry:
+		// Successfully sent to channel
 	case <-l.done:
-		l.pendingWG.Done()
-		return
-	default:
-		// Channel is full; drop the entry to avoid blocking callers.
+		// Logger is closing, drop this entry
 		l.pendingWG.Done()
 		return
 	}
@@ -242,11 +233,11 @@ func (l *Logger) run() {
 		case <-ticker.C:
 			l.writer.Flush()
 
-		case <-l.flushReq:
-			// Explicit flush request
-			l.flushMu.Lock()
+		case flushDone := <-l.flushReq:
+			// Explicit flush request - flush writer and sync to disk
 			l.writer.Flush()
-			l.flushMu.Unlock()
+			l.file.Sync()
+			close(flushDone)
 		}
 	}
 }

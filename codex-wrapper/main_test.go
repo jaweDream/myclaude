@@ -788,11 +788,13 @@ func TestSilentMode(t *testing.T) {
 	verbose := capture(false)
 	quiet := capture(true)
 
+	// After refactoring, logs are only written to file, not stderr
+	// Both silent and non-silent modes should produce no stderr output
 	if quiet != "" {
 		t.Fatalf("silent mode should suppress stderr, got: %q", quiet)
 	}
-	if !strings.Contains(verbose, "INFO: Starting codex") {
-		t.Fatalf("non-silent mode should log to stderr, got: %q", verbose)
+	if verbose != "" {
+		t.Fatalf("non-silent mode should also suppress stderr (logs go to file), got: %q", verbose)
 	}
 }
 
@@ -1136,10 +1138,10 @@ func TestRun_ExplicitStdinReadError(t *testing.T) {
 	if !strings.Contains(logOutput, "Failed to read stdin: broken stdin") {
 		t.Fatalf("log missing read error entry, got %q", logOutput)
 	}
-	if _, err := os.Stat(logPath); os.IsNotExist(err) {
-		t.Fatalf("log file should exist")
+	// Log file is always removed after completion (new behavior)
+	if _, err := os.Stat(logPath); !os.IsNotExist(err) {
+		t.Fatalf("log file should be removed after completion")
 	}
-	defer os.Remove(logPath)
 }
 
 func TestRun_CommandFails(t *testing.T) {
@@ -1220,10 +1222,10 @@ func TestRun_PipedTaskReadError(t *testing.T) {
 	if !strings.Contains(logOutput, "ERROR: Failed to read piped stdin: read stdin: pipe failure") {
 		t.Fatalf("log missing piped read error, got %q", logOutput)
 	}
-	if _, err := os.Stat(logPath); os.IsNotExist(err) {
-		t.Fatalf("log file should exist")
+	// Log file is always removed after completion (new behavior)
+	if _, err := os.Stat(logPath); !os.IsNotExist(err) {
+		t.Fatalf("log file should be removed after completion")
 	}
-	defer os.Remove(logPath)
 }
 
 func TestRun_PipedTaskSuccess(t *testing.T) {
@@ -1325,17 +1327,21 @@ printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"l
 	if exitCode != 130 {
 		t.Fatalf("exit code = %d, want 130", exitCode)
 	}
-	if _, err := os.Stat(logPath); os.IsNotExist(err) {
-		t.Fatalf("log file should exist after signal exit")
+	// Log file is always removed after completion (new behavior)
+	if _, err := os.Stat(logPath); !os.IsNotExist(err) {
+		t.Fatalf("log file should be removed after completion")
 	}
-	defer os.Remove(logPath)
 }
 
 func TestRun_CleanupHookAlwaysCalled(t *testing.T) {
 	defer resetTestHooks()
 	called := false
 	cleanupHook = func() { called = true }
-	os.Args = []string{"codex-wrapper", "--version"}
+	// Use a command that goes through normal flow, not --version which returns early
+	codexCommand = "echo"
+	buildCodexArgsFn = func(cfg *Config, targetArg string) []string { return []string{`{"type":"thread.started","thread_id":"x"}
+{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}`} }
+	os.Args = []string{"codex-wrapper", "task"}
 	if exitCode := run(); exitCode != 0 {
 		t.Fatalf("exit = %d, want 0", exitCode)
 	}
