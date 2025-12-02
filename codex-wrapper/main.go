@@ -19,11 +19,12 @@ import (
 )
 
 const (
-	version           = "1.0.0"
-	defaultWorkdir    = "."
-	defaultTimeout    = 7200 // seconds
-	forceKillDelay    = 5    // seconds
-	stdinSpecialChars = "\n\\\"'`$"
+	version            = "1.0.0"
+	defaultWorkdir     = "."
+	defaultTimeout     = 7200 // seconds
+	forceKillDelay     = 5    // seconds
+	stdinSpecialChars  = "\n\\\"'`$"
+	stderrCaptureLimit = 4 * 1024
 )
 
 // Test hooks for dependency injection
@@ -616,12 +617,17 @@ func runCodexTask(taskSpec TaskSpec, silent bool, timeoutSec int) TaskResult {
 	logInfoFn := logInfo
 	logWarnFn := logWarn
 	logErrorFn := logError
-	stderrWriter := io.Writer(os.Stderr)
+	stderrBuf := &tailBuffer{limit: stderrCaptureLimit}
+	stderrWriter := io.Writer(io.MultiWriter(os.Stderr, stderrBuf))
 	if silent {
 		logInfoFn = func(string) {}
 		logWarnFn = func(string) {}
 		logErrorFn = func(string) {}
-		stderrWriter = io.Discard
+		stderrWriter = stderrBuf
+	}
+
+	attachStderr := func(msg string) string {
+		return fmt.Sprintf("%s; stderr: %s", msg, stderrBuf.String())
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSec)*time.Second)
@@ -638,7 +644,7 @@ func runCodexTask(taskSpec TaskSpec, silent bool, timeoutSec int) TaskResult {
 		if err != nil {
 			logErrorFn("Failed to create stdin pipe: " + err.Error())
 			result.ExitCode = 1
-			result.Error = "failed to create stdin pipe: " + err.Error()
+			result.Error = attachStderr("failed to create stdin pipe: " + err.Error())
 			return result
 		}
 	}
@@ -648,7 +654,7 @@ func runCodexTask(taskSpec TaskSpec, silent bool, timeoutSec int) TaskResult {
 	if err != nil {
 		logErrorFn("Failed to create stdout pipe: " + err.Error())
 		result.ExitCode = 1
-		result.Error = "failed to create stdout pipe: " + err.Error()
+		result.Error = attachStderr("failed to create stdout pipe: " + err.Error())
 		return result
 	}
 
@@ -659,12 +665,12 @@ func runCodexTask(taskSpec TaskSpec, silent bool, timeoutSec int) TaskResult {
 		if strings.Contains(err.Error(), "executable file not found") {
 			logErrorFn("codex command not found in PATH")
 			result.ExitCode = 127
-			result.Error = "codex command not found in PATH"
+			result.Error = attachStderr("codex command not found in PATH")
 			return result
 		}
 		logErrorFn("Failed to start codex: " + err.Error())
 		result.ExitCode = 1
-		result.Error = "failed to start codex: " + err.Error()
+		result.Error = attachStderr("failed to start codex: " + err.Error())
 		return result
 	}
 	logInfoFn(fmt.Sprintf("Process started with PID: %d", cmd.Process.Pid))
@@ -696,7 +702,7 @@ func runCodexTask(taskSpec TaskSpec, silent bool, timeoutSec int) TaskResult {
 			cmd.Process.Kill()
 		}
 		result.ExitCode = 124
-		result.Error = "codex execution timeout"
+		result.Error = attachStderr("codex execution timeout")
 		return result
 	}
 
@@ -706,19 +712,19 @@ func runCodexTask(taskSpec TaskSpec, silent bool, timeoutSec int) TaskResult {
 			code := exitErr.ExitCode()
 			logErrorFn(fmt.Sprintf("Codex exited with status %d", code))
 			result.ExitCode = code
-			result.Error = fmt.Sprintf("codex exited with status %d", code)
+			result.Error = attachStderr(fmt.Sprintf("codex exited with status %d", code))
 			return result
 		}
 		logErrorFn("Codex error: " + err.Error())
 		result.ExitCode = 1
-		result.Error = "codex error: " + err.Error()
+		result.Error = attachStderr("codex error: " + err.Error())
 		return result
 	}
 
 	if message == "" {
 		logErrorFn("Codex completed without agent_message output")
 		result.ExitCode = 1
-		result.Error = "codex completed without agent_message output"
+		result.Error = attachStderr("codex completed without agent_message output")
 		return result
 	}
 
@@ -727,6 +733,36 @@ func runCodexTask(taskSpec TaskSpec, silent bool, timeoutSec int) TaskResult {
 	result.SessionID = threadID
 
 	return result
+}
+
+type tailBuffer struct {
+	limit int
+	data  []byte
+}
+
+func (b *tailBuffer) Write(p []byte) (int, error) {
+	if b.limit <= 0 {
+		return len(p), nil
+	}
+
+	if len(p) >= b.limit {
+		b.data = append(b.data[:0], p[len(p)-b.limit:]...)
+		return len(p), nil
+	}
+
+	total := len(b.data) + len(p)
+	if total <= b.limit {
+		b.data = append(b.data, p...)
+		return len(p), nil
+	}
+
+	overflow := total - b.limit
+	b.data = append(b.data[overflow:], p...)
+	return len(p), nil
+}
+
+func (b *tailBuffer) String() string {
+	return string(b.data)
 }
 
 func forwardSignals(ctx context.Context, cmd *exec.Cmd, logErrorFn func(string)) {
