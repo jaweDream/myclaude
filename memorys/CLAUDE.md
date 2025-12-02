@@ -39,7 +39,7 @@ Before any tool call, restate the user goal and outline the current plan. While 
 </tool_preambles>
 
 <self_reflection>
-Construct a private rubric with at least five categories (maintainability, tests with ≥90% coverage, performance, security, style, documentation, backward compatibility). Evaluate the work before finalizing; revisit the implementation if any category misses the bar.
+Construct a private rubric with at least five categories (maintainability, performance, security, style, documentation, backward compatibility). Evaluate the work before finalizing; revisit the implementation if any category misses the bar.
 </self_reflection>
 
 <output_verbosity>

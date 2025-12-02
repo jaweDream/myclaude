@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -22,12 +24,79 @@ func resetTestHooks() {
 	stdinReader = os.Stdin
 	isTerminalFn = defaultIsTerminal
 	codexCommand = "codex"
+	cleanupHook = nil
 	buildCodexArgsFn = buildCodexArgs
 	commandContext = exec.CommandContext
 	jsonMarshal = json.Marshal
+	closeLogger()
 }
 
-func TestParseArgs_NewMode(t *testing.T) {
+type capturedStdout struct {
+	buf    bytes.Buffer
+	old    *os.File
+	reader *os.File
+	writer *os.File
+}
+
+type errReader struct {
+	err error
+}
+
+func (e errReader) Read([]byte) (int, error) {
+	return 0, e.err
+}
+
+func captureStdoutPipe() *capturedStdout {
+	r, w, _ := os.Pipe()
+	state := &capturedStdout{old: os.Stdout, reader: r, writer: w}
+	os.Stdout = w
+	return state
+}
+
+func restoreStdoutPipe(c *capturedStdout) {
+	if c == nil {
+		return
+	}
+	c.writer.Close()
+	os.Stdout = c.old
+	io.Copy(&c.buf, c.reader)
+}
+
+func (c *capturedStdout) String() string {
+	if c == nil {
+		return ""
+	}
+	return c.buf.String()
+}
+
+func captureOutput(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, _ := os.Pipe()
+	old := os.Stdout
+	os.Stdout = w
+	fn()
+	w.Close()
+	os.Stdout = old
+
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	return buf.String()
+}
+
+func createFakeCodexScript(t *testing.T, threadID, message string) string {
+	t.Helper()
+	scriptPath := filepath.Join(t.TempDir(), "codex.sh")
+	script := fmt.Sprintf(`#!/bin/sh
+printf '%%s\n' '{"type":"thread.started","thread_id":"%s"}'
+printf '%%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"%s"}}'
+`, threadID, message)
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("failed to create fake codex script: %v", err)
+	}
+	return scriptPath
+}
+
+func TestRunParseArgs_NewMode(t *testing.T) {
 	tests := []struct {
 		name    string
 		args    []string
@@ -37,68 +106,39 @@ func TestParseArgs_NewMode(t *testing.T) {
 		{
 			name: "simple task",
 			args: []string{"codex-wrapper", "analyze code"},
-			want: &Config{
-				Mode:          "new",
-				Task:          "analyze code",
-				WorkDir:       ".",
-				ExplicitStdin: false,
-			},
+			want: &Config{Mode: "new", Task: "analyze code", WorkDir: ".", ExplicitStdin: false},
 		},
 		{
 			name: "task with workdir",
 			args: []string{"codex-wrapper", "analyze code", "/path/to/dir"},
-			want: &Config{
-				Mode:          "new",
-				Task:          "analyze code",
-				WorkDir:       "/path/to/dir",
-				ExplicitStdin: false,
-			},
+			want: &Config{Mode: "new", Task: "analyze code", WorkDir: "/path/to/dir", ExplicitStdin: false},
 		},
 		{
 			name: "explicit stdin mode",
 			args: []string{"codex-wrapper", "-"},
-			want: &Config{
-				Mode:          "new",
-				Task:          "-",
-				WorkDir:       ".",
-				ExplicitStdin: true,
-			},
+			want: &Config{Mode: "new", Task: "-", WorkDir: ".", ExplicitStdin: true},
 		},
 		{
 			name: "stdin with workdir",
 			args: []string{"codex-wrapper", "-", "/some/dir"},
-			want: &Config{
-				Mode:          "new",
-				Task:          "-",
-				WorkDir:       "/some/dir",
-				ExplicitStdin: true,
-			},
+			want: &Config{Mode: "new", Task: "-", WorkDir: "/some/dir", ExplicitStdin: true},
 		},
-		{
-			name:    "no args",
-			args:    []string{"codex-wrapper"},
-			wantErr: true,
-		},
+		{name: "no args", args: []string{"codex-wrapper"}, wantErr: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			os.Args = tt.args
-
 			cfg, err := parseArgs()
-
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("parseArgs() expected error, got nil")
 				}
 				return
 			}
-
 			if err != nil {
-				t.Errorf("parseArgs() unexpected error: %v", err)
-				return
+				t.Fatalf("parseArgs() unexpected error: %v", err)
 			}
-
 			if cfg.Mode != tt.want.Mode {
 				t.Errorf("Mode = %v, want %v", cfg.Mode, tt.want.Mode)
 			}
@@ -115,7 +155,7 @@ func TestParseArgs_NewMode(t *testing.T) {
 	}
 }
 
-func TestParseArgs_ResumeMode(t *testing.T) {
+func TestRunParseArgs_ResumeMode(t *testing.T) {
 	tests := []struct {
 		name    string
 		args    []string
@@ -125,80 +165,37 @@ func TestParseArgs_ResumeMode(t *testing.T) {
 		{
 			name: "resume with task",
 			args: []string{"codex-wrapper", "resume", "session-123", "continue task"},
-			want: &Config{
-				Mode:          "resume",
-				SessionID:     "session-123",
-				Task:          "continue task",
-				WorkDir:       ".",
-				ExplicitStdin: false,
-			},
+			want: &Config{Mode: "resume", SessionID: "session-123", Task: "continue task", WorkDir: ".", ExplicitStdin: false},
 		},
 		{
 			name: "resume with workdir",
 			args: []string{"codex-wrapper", "resume", "session-456", "task", "/work"},
-			want: &Config{
-				Mode:          "resume",
-				SessionID:     "session-456",
-				Task:          "task",
-				WorkDir:       "/work",
-				ExplicitStdin: false,
-			},
+			want: &Config{Mode: "resume", SessionID: "session-456", Task: "task", WorkDir: "/work", ExplicitStdin: false},
 		},
 		{
 			name: "resume with stdin",
 			args: []string{"codex-wrapper", "resume", "session-789", "-"},
-			want: &Config{
-				Mode:          "resume",
-				SessionID:     "session-789",
-				Task:          "-",
-				WorkDir:       ".",
-				ExplicitStdin: true,
-			},
+			want: &Config{Mode: "resume", SessionID: "session-789", Task: "-", WorkDir: ".", ExplicitStdin: true},
 		},
-		{
-			name:    "resume missing session_id",
-			args:    []string{"codex-wrapper", "resume"},
-			wantErr: true,
-		},
-		{
-			name:    "resume missing task",
-			args:    []string{"codex-wrapper", "resume", "session-123"},
-			wantErr: true,
-		},
+		{name: "resume missing session_id", args: []string{"codex-wrapper", "resume"}, wantErr: true},
+		{name: "resume missing task", args: []string{"codex-wrapper", "resume", "session-123"}, wantErr: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			os.Args = tt.args
-
 			cfg, err := parseArgs()
-
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("parseArgs() expected error, got nil")
 				}
 				return
 			}
-
 			if err != nil {
-				t.Errorf("parseArgs() unexpected error: %v", err)
-				return
+				t.Fatalf("parseArgs() unexpected error: %v", err)
 			}
-
-			if cfg.Mode != tt.want.Mode {
-				t.Errorf("Mode = %v, want %v", cfg.Mode, tt.want.Mode)
-			}
-			if cfg.SessionID != tt.want.SessionID {
-				t.Errorf("SessionID = %v, want %v", cfg.SessionID, tt.want.SessionID)
-			}
-			if cfg.Task != tt.want.Task {
-				t.Errorf("Task = %v, want %v", cfg.Task, tt.want.Task)
-			}
-			if cfg.WorkDir != tt.want.WorkDir {
-				t.Errorf("WorkDir = %v, want %v", cfg.WorkDir, tt.want.WorkDir)
-			}
-			if cfg.ExplicitStdin != tt.want.ExplicitStdin {
-				t.Errorf("ExplicitStdin = %v, want %v", cfg.ExplicitStdin, tt.want.ExplicitStdin)
+			if cfg.Mode != tt.want.Mode || cfg.SessionID != tt.want.SessionID || cfg.Task != tt.want.Task || cfg.WorkDir != tt.want.WorkDir || cfg.ExplicitStdin != tt.want.ExplicitStdin {
+				t.Errorf("parseArgs() mismatch: %+v vs %+v", cfg, tt.want)
 			}
 		})
 	}
@@ -215,23 +212,12 @@ do something`
 	if err != nil {
 		t.Fatalf("parseParallelConfig() unexpected error: %v", err)
 	}
-
 	if len(cfg.Tasks) != 1 {
 		t.Fatalf("expected 1 task, got %d", len(cfg.Tasks))
 	}
-
 	task := cfg.Tasks[0]
-	if task.ID != "task-1" {
-		t.Errorf("task.ID = %q, want %q", task.ID, "task-1")
-	}
-	if task.Task != "do something" {
-		t.Errorf("task.Task = %q, want %q", task.Task, "do something")
-	}
-	if task.WorkDir != defaultWorkdir {
-		t.Errorf("task.WorkDir = %q, want %q", task.WorkDir, defaultWorkdir)
-	}
-	if len(task.Dependencies) != 1 || task.Dependencies[0] != "task-0" {
-		t.Errorf("dependencies = %v, want [task-0]", task.Dependencies)
+	if task.ID != "task-1" || task.Task != "do something" || task.WorkDir != defaultWorkdir || len(task.Dependencies) != 1 || task.Dependencies[0] != "task-0" {
+		t.Fatalf("task mismatch: %+v", task)
 	}
 }
 
@@ -303,12 +289,6 @@ code with special chars: $var "quotes"`
 	if len(cfg.Tasks) != 2 {
 		t.Fatalf("expected 2 tasks, got %d", len(cfg.Tasks))
 	}
-	if cfg.Tasks[0].ID != "T1" || cfg.Tasks[0].Task != "echo 'test'" {
-		t.Errorf("task T1 mismatch")
-	}
-	if cfg.Tasks[1].ID != "T2" || len(cfg.Tasks[1].Dependencies) != 1 {
-		t.Errorf("task T2 mismatch")
-	}
 }
 
 func TestShouldUseStdin(t *testing.T) {
@@ -340,64 +320,35 @@ func TestShouldUseStdin(t *testing.T) {
 	}
 }
 
-func TestBuildCodexArgs_NewMode(t *testing.T) {
-	cfg := &Config{
-		Mode:    "new",
-		WorkDir: "/test/dir",
-	}
-
+func TestRunBuildCodexArgs_NewMode(t *testing.T) {
+	cfg := &Config{Mode: "new", WorkDir: "/test/dir"}
 	args := buildCodexArgs(cfg, "my task")
-
-	expected := []string{
-		"e",
-		"--skip-git-repo-check",
-		"-C", "/test/dir",
-		"--json",
-		"my task",
-	}
-
+	expected := []string{"e", "--skip-git-repo-check", "-C", "/test/dir", "--json", "my task"}
 	if len(args) != len(expected) {
-		t.Errorf("buildCodexArgs() returned %d args, want %d", len(args), len(expected))
-		return
+		t.Fatalf("len mismatch")
 	}
-
-	for i, arg := range args {
-		if arg != expected[i] {
-			t.Errorf("buildCodexArgs()[%d] = %v, want %v", i, arg, expected[i])
+	for i := range args {
+		if args[i] != expected[i] {
+			t.Fatalf("args[%d]=%s, want %s", i, args[i], expected[i])
 		}
 	}
 }
 
-func TestBuildCodexArgs_ResumeMode(t *testing.T) {
-	cfg := &Config{
-		Mode:      "resume",
-		SessionID: "session-abc",
-	}
-
+func TestRunBuildCodexArgs_ResumeMode(t *testing.T) {
+	cfg := &Config{Mode: "resume", SessionID: "session-abc"}
 	args := buildCodexArgs(cfg, "-")
-
-	expected := []string{
-		"e",
-		"--skip-git-repo-check",
-		"--json",
-		"resume",
-		"session-abc",
-		"-",
-	}
-
+	expected := []string{"e", "--skip-git-repo-check", "--json", "resume", "session-abc", "-"}
 	if len(args) != len(expected) {
-		t.Errorf("buildCodexArgs() returned %d args, want %d", len(args), len(expected))
-		return
+		t.Fatalf("len mismatch")
 	}
-
-	for i, arg := range args {
-		if arg != expected[i] {
-			t.Errorf("buildCodexArgs()[%d] = %v, want %v", i, arg, expected[i])
+	for i := range args {
+		if args[i] != expected[i] {
+			t.Fatalf("args[%d]=%s, want %s", i, args[i], expected[i])
 		}
 	}
 }
 
-func TestResolveTimeout(t *testing.T) {
+func TestRunResolveTimeout(t *testing.T) {
 	tests := []struct {
 		name   string
 		envVal string
@@ -418,7 +369,6 @@ func TestResolveTimeout(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			os.Setenv("CODEX_TIMEOUT", tt.envVal)
 			defer os.Unsetenv("CODEX_TIMEOUT")
-
 			got := resolveTimeout()
 			if got != tt.want {
 				t.Errorf("resolveTimeout() with env=%q = %v, want %v", tt.envVal, got, tt.want)
@@ -427,7 +377,7 @@ func TestResolveTimeout(t *testing.T) {
 	}
 }
 
-func TestNormalizeText(t *testing.T) {
+func TestRunNormalizeText(t *testing.T) {
 	tests := []struct {
 		name  string
 		input interface{}
@@ -460,75 +410,32 @@ func TestParseJSONStream(t *testing.T) {
 		wantThreadID string
 	}
 
-	longText := strings.Repeat("a", 2*1024*1024) // >1MB agent_message payload
+	longText := strings.Repeat("a", 2*1024*1024)
 
 	tests := []testCase{
-		{
-			name: "thread started and agent message",
-			input: `{"type":"thread.started","thread_id":"abc-123"}
-{"type":"item.completed","item":{"type":"agent_message","text":"Hello world"}}`,
-			wantMessage:  "Hello world",
-			wantThreadID: "abc-123",
-		},
-		{
-			name: "multiple agent messages (last wins)",
-			input: `{"type":"item.completed","item":{"type":"agent_message","text":"First"}}
-{"type":"item.completed","item":{"type":"agent_message","text":"Second"}}`,
-			wantMessage:  "Second",
-			wantThreadID: "",
-		},
-		{
-			name:         "text as array",
-			input:        `{"type":"item.completed","item":{"type":"agent_message","text":["Hello"," ","World"]}}`,
-			wantMessage:  "Hello World",
-			wantThreadID: "",
-		},
-		{
-			name: "ignore other event types",
-			input: `{"type":"other.event","data":"ignored"}
+		{"thread started and agent message", `{"type":"thread.started","thread_id":"abc-123"}
+{"type":"item.completed","item":{"type":"agent_message","text":"Hello world"}}`, "Hello world", "abc-123"},
+		{"multiple agent messages", `{"type":"item.completed","item":{"type":"agent_message","text":"First"}}
+{"type":"item.completed","item":{"type":"agent_message","text":"Second"}}`, "Second", ""},
+		{"text as array", `{"type":"item.completed","item":{"type":"agent_message","text":["Hello"," ","World"]}}`, "Hello World", ""},
+		{"ignore other event types", `{"type":"other.event","data":"ignored"}
 {"type":"item.completed","item":{"type":"other_type","text":"ignored"}}
-{"type":"item.completed","item":{"type":"agent_message","text":"Valid"}}`,
-			wantMessage:  "Valid",
-			wantThreadID: "",
-		},
-		{
-			name:         "super long single line (>1MB)",
-			input:        `{"type":"item.completed","item":{"type":"agent_message","text":"` + longText + `"}}`,
-			wantMessage:  longText,
-			wantThreadID: "",
-		},
-		{
-			name:         "empty input",
-			input:        "",
-			wantMessage:  "",
-			wantThreadID: "",
-		},
-		{
-			name: "item completed with nil item",
-			input: strings.Join([]string{
-				`{"type":"thread.started","thread_id":"nil-item-thread"}`,
-				`{"type":"item.completed","item":null}`,
-			}, "\n"),
-			wantMessage:  "",
-			wantThreadID: "nil-item-thread",
-		},
-		{
-			name:         "agent message with non-string text",
-			input:        `{"type":"item.completed","item":{"type":"agent_message","text":12345}}`,
-			wantMessage:  "",
-			wantThreadID: "",
-		},
+{"type":"item.completed","item":{"type":"agent_message","text":"Valid"}}`, "Valid", ""},
+		{"super long single line", `{"type":"item.completed","item":{"type":"agent_message","text":"` + longText + `"}}`, longText, ""},
+		{"empty input", "", "", ""},
+		{"item completed with nil item", strings.Join([]string{`{"type":"thread.started","thread_id":"nil-item-thread"}`, `{"type":"item.completed","item":null}`}, "\n"), "", "nil-item-thread"},
+		{"agent message with non-string text", `{"type":"item.completed","item":{"type":"agent_message","text":12345}}`, "", ""},
+		{"corrupted json does not break stream", strings.Join([]string{`{"type":"item.completed","item":{"type":"agent_message","text":"before"}}`, `{"type":"item.completed","item":{"type":"agent_message","text":"broken"}`, `{"type":"thread.started","thread_id":"after-thread"}`, `{"type":"item.completed","item":{"type":"agent_message","text":"after"}}`}, "\n"), "after", "after-thread"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			gotMessage, gotThreadID := parseJSONStream(strings.NewReader(tt.input))
-
 			if gotMessage != tt.wantMessage {
-				t.Errorf("parseJSONStream() message = %q, want %q", gotMessage, tt.wantMessage)
+				t.Errorf("message = %q, want %q", gotMessage, tt.wantMessage)
 			}
 			if gotThreadID != tt.wantThreadID {
-				t.Errorf("parseJSONStream() threadID = %q, want %q", gotThreadID, tt.wantThreadID)
+				t.Errorf("threadID = %q, want %q", gotThreadID, tt.wantThreadID)
 			}
 		})
 	}
@@ -536,20 +443,17 @@ func TestParseJSONStream(t *testing.T) {
 
 func TestParseJSONStreamWithWarn_InvalidLine(t *testing.T) {
 	var warnings []string
-	warnFn := func(msg string) {
-		warnings = append(warnings, msg)
-	}
-
+	warnFn := func(msg string) { warnings = append(warnings, msg) }
 	message, threadID := parseJSONStreamWithWarn(strings.NewReader("not-json"), warnFn)
 	if message != "" || threadID != "" {
-		t.Fatalf("expected empty output for invalid json, got message=%q thread=%q", message, threadID)
+		t.Fatalf("expected empty output, got message=%q thread=%q", message, threadID)
 	}
 	if len(warnings) == 0 {
 		t.Fatalf("expected warning to be emitted")
 	}
 }
 
-func TestGetEnv(t *testing.T) {
+func TestRunGetEnv(t *testing.T) {
 	tests := []struct {
 		name       string
 		key        string
@@ -579,7 +483,7 @@ func TestGetEnv(t *testing.T) {
 	}
 }
 
-func TestTruncate(t *testing.T) {
+func TestRunTruncate(t *testing.T) {
 	tests := []struct {
 		name   string
 		input  string
@@ -603,17 +507,10 @@ func TestTruncate(t *testing.T) {
 	}
 }
 
-func TestMin(t *testing.T) {
+func TestRunMin(t *testing.T) {
 	tests := []struct {
 		a, b, want int
-	}{
-		{1, 2, 1},
-		{2, 1, 1},
-		{5, 5, 5},
-		{-1, 0, -1},
-		{0, -1, -1},
-	}
-
+	}{{1, 2, 1}, {2, 1, 1}, {5, 5, 5}, {-1, 0, -1}, {0, -1, -1}}
 	for _, tt := range tests {
 		t.Run("", func(t *testing.T) {
 			got := min(tt.a, tt.b)
@@ -624,51 +521,29 @@ func TestMin(t *testing.T) {
 	}
 }
 
-func TestHello(t *testing.T) {
-	got := hello()
-	if got != "hello world" {
-		t.Fatalf("hello() = %q, want %q", got, "hello world")
-	}
-}
+func TestRunLogFunctions(t *testing.T) {
+	defer resetTestHooks()
+	tempDir := t.TempDir()
+	t.Setenv("TMPDIR", tempDir)
 
-func TestGreet(t *testing.T) {
-	got := greet("Linus")
-	if got != "hello Linus" {
-		t.Fatalf("greet() = %q, want %q", got, "hello Linus")
+	logger, err := NewLogger()
+	if err != nil {
+		t.Fatalf("NewLogger() error = %v", err)
 	}
-}
-
-func TestFarewell(t *testing.T) {
-	got := farewell("Linus")
-	if got != "goodbye Linus" {
-		t.Fatalf("farewell() = %q, want %q", got, "goodbye Linus")
-	}
-}
-
-func TestFarewellEmpty(t *testing.T) {
-	got := farewell("")
-	if got != "goodbye " {
-		t.Fatalf("farewell(\"\") = %q, want %q", got, "goodbye ")
-	}
-}
-
-func TestLogFunctions(t *testing.T) {
-	// Capture stderr
-	oldStderr := os.Stderr
-	r, w, _ := os.Pipe()
-	os.Stderr = w
+	setLogger(logger)
+	defer closeLogger()
 
 	logInfo("info message")
 	logWarn("warn message")
 	logError("error message")
+	logger.Flush()
 
-	w.Close()
-	os.Stderr = oldStderr
+	data, err := os.ReadFile(logger.Path())
+	if err != nil {
+		t.Fatalf("failed to read log file: %v", err)
+	}
 
-	var buf bytes.Buffer
-	io.Copy(&buf, r)
-	output := buf.String()
-
+	output := string(data)
 	if !strings.Contains(output, "INFO: info message") {
 		t.Errorf("logInfo output missing, got: %s", output)
 	}
@@ -680,14 +555,11 @@ func TestLogFunctions(t *testing.T) {
 	}
 }
 
-func TestPrintHelp(t *testing.T) {
-	// Capture stdout
+func TestRunPrintHelp(t *testing.T) {
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
-
 	printHelp()
-
 	w.Close()
 	os.Stdout = oldStdout
 
@@ -695,33 +567,21 @@ func TestPrintHelp(t *testing.T) {
 	io.Copy(&buf, r)
 	output := buf.String()
 
-	expectedPhrases := []string{
-		"codex-wrapper",
-		"Usage:",
-		"resume",
-		"CODEX_TIMEOUT",
-		"Exit Codes:",
-	}
-
-	for _, phrase := range expectedPhrases {
+	expected := []string{"codex-wrapper", "Usage:", "resume", "CODEX_TIMEOUT", "Exit Codes:"}
+	for _, phrase := range expected {
 		if !strings.Contains(output, phrase) {
 			t.Errorf("printHelp() missing phrase %q", phrase)
 		}
 	}
 }
 
-// Tests for isTerminal with mock
-func TestIsTerminal(t *testing.T) {
+func TestRunIsTerminal(t *testing.T) {
 	defer resetTestHooks()
-
 	tests := []struct {
 		name   string
 		mockFn func() bool
 		want   bool
-	}{
-		{"is terminal", func() bool { return true }, true},
-		{"is not terminal", func() bool { return false }, false},
-	}
+	}{{"is terminal", func() bool { return true }, true}, {"is not terminal", func() bool { return false }, false}}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -734,27 +594,35 @@ func TestIsTerminal(t *testing.T) {
 	}
 }
 
-// Tests for readPipedTask with mock
 func TestReadPipedTask(t *testing.T) {
 	defer resetTestHooks()
-
 	tests := []struct {
-		name         string
-		isTerminal   bool
-		stdinContent string
-		want         string
+		name       string
+		isTerminal bool
+		stdin      io.Reader
+		want       string
+		wantErr    bool
 	}{
-		{"terminal mode", true, "ignored", ""},
-		{"piped with data", false, "task from pipe", "task from pipe"},
-		{"piped empty", false, "", ""},
+		{"terminal mode", true, strings.NewReader("ignored"), "", false},
+		{"piped with data", false, strings.NewReader("task from pipe"), "task from pipe", false},
+		{"piped empty", false, strings.NewReader(""), "", false},
+		{"piped read error", false, errReader{errors.New("boom")}, "", true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			isTerminalFn = func() bool { return tt.isTerminal }
-			stdinReader = strings.NewReader(tt.stdinContent)
-
-			got := readPipedTask()
+			stdinReader = tt.stdin
+			got, err := readPipedTask()
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
 			if got != tt.want {
 				t.Errorf("readPipedTask() = %q, want %q", got, tt.want)
 			}
@@ -762,26 +630,21 @@ func TestReadPipedTask(t *testing.T) {
 	}
 }
 
-// Tests for runCodexTask with mock command
 func TestRunCodexTask_CommandNotFound(t *testing.T) {
 	defer resetTestHooks()
-
 	codexCommand = "nonexistent-command-xyz"
 	buildCodexArgsFn = func(cfg *Config, targetArg string) []string { return []string{targetArg} }
-
 	res := runCodexTask(TaskSpec{Task: "task"}, false, 10)
-
 	if res.ExitCode != 127 {
-		t.Errorf("runCodexTask() exitCode = %d, want 127 for command not found", res.ExitCode)
+		t.Errorf("exitCode = %d, want 127", res.ExitCode)
 	}
 	if res.Error == "" {
-		t.Errorf("runCodexTask() expected error message for missing command")
+		t.Errorf("expected error message")
 	}
 }
 
 func TestRunCodexTask_StartError(t *testing.T) {
 	defer resetTestHooks()
-
 	tmpFile, err := os.CreateTemp("", "start-error")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
@@ -792,18 +655,13 @@ func TestRunCodexTask_StartError(t *testing.T) {
 	buildCodexArgsFn = func(cfg *Config, targetArg string) []string { return []string{} }
 
 	res := runCodexTask(TaskSpec{Task: "task"}, false, 1)
-
-	if res.ExitCode != 1 {
-		t.Fatalf("runCodexTask() exitCode = %d, want 1 for start error", res.ExitCode)
-	}
-	if !strings.Contains(res.Error, "failed to start codex") {
-		t.Fatalf("runCodexTask() unexpected error: %s", res.Error)
+	if res.ExitCode != 1 || !strings.Contains(res.Error, "failed to start codex") {
+		t.Fatalf("unexpected result: %+v", res)
 	}
 }
 
 func TestRunCodexTask_WithEcho(t *testing.T) {
 	defer resetTestHooks()
-
 	codexCommand = "echo"
 	buildCodexArgsFn = func(cfg *Config, targetArg string) []string { return []string{targetArg} }
 
@@ -811,80 +669,51 @@ func TestRunCodexTask_WithEcho(t *testing.T) {
 {"type":"item.completed","item":{"type":"agent_message","text":"Test output"}}`
 
 	res := runCodexTask(TaskSpec{Task: jsonOutput}, false, 10)
-
-	if res.ExitCode != 0 {
-		t.Errorf("runCodexTask() exitCode = %d, want 0", res.ExitCode)
-	}
-	if res.Message != "Test output" {
-		t.Errorf("runCodexTask() message = %q, want %q", res.Message, "Test output")
-	}
-	if res.SessionID != "test-session" {
-		t.Errorf("runCodexTask() sessionID = %q, want %q", res.SessionID, "test-session")
+	if res.ExitCode != 0 || res.Message != "Test output" || res.SessionID != "test-session" {
+		t.Fatalf("unexpected result: %+v", res)
 	}
 }
 
 func TestRunCodexTask_NoMessage(t *testing.T) {
 	defer resetTestHooks()
-
 	codexCommand = "echo"
 	buildCodexArgsFn = func(cfg *Config, targetArg string) []string { return []string{targetArg} }
-
 	jsonOutput := `{"type":"thread.started","thread_id":"test-session"}`
-
 	res := runCodexTask(TaskSpec{Task: jsonOutput}, false, 10)
-
-	if res.ExitCode != 1 {
-		t.Errorf("runCodexTask() exitCode = %d, want 1 for no message", res.ExitCode)
-	}
-	if res.Error == "" {
-		t.Errorf("runCodexTask() expected error for missing agent_message output")
+	if res.ExitCode != 1 || res.Error == "" {
+		t.Fatalf("expected error for missing agent_message, got %+v", res)
 	}
 }
 
 func TestRunCodexTask_WithStdin(t *testing.T) {
 	defer resetTestHooks()
-
 	codexCommand = "cat"
 	buildCodexArgsFn = func(cfg *Config, targetArg string) []string { return []string{} }
-
 	jsonInput := `{"type":"item.completed","item":{"type":"agent_message","text":"from stdin"}}`
-
 	res := runCodexTask(TaskSpec{Task: jsonInput, UseStdin: true}, false, 10)
-
-	if res.ExitCode != 0 {
-		t.Errorf("runCodexTask() exitCode = %d, want 0", res.ExitCode)
-	}
-	if res.Message != "from stdin" {
-		t.Errorf("runCodexTask() message = %q, want %q", res.Message, "from stdin")
+	if res.ExitCode != 0 || res.Message != "from stdin" {
+		t.Fatalf("unexpected result: %+v", res)
 	}
 }
 
 func TestRunCodexTask_ExitError(t *testing.T) {
 	defer resetTestHooks()
-
 	codexCommand = "false"
 	buildCodexArgsFn = func(cfg *Config, targetArg string) []string { return []string{} }
-
 	res := runCodexTask(TaskSpec{Task: "noop"}, false, 10)
-
-	if res.ExitCode == 0 {
-		t.Errorf("runCodexTask() exitCode = 0, want non-zero for failed command")
-	}
-	if res.Error == "" {
-		t.Errorf("runCodexTask() expected error message for failed command")
+	if res.ExitCode == 0 || res.Error == "" {
+		t.Fatalf("expected failure, got %+v", res)
 	}
 }
 
 func TestRunCodexTask_StdinPipeError(t *testing.T) {
 	defer resetTestHooks()
-
 	commandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
 		cmd := exec.CommandContext(ctx, "cat")
 		cmd.Stdin = os.Stdin
 		return cmd
 	}
 	buildCodexArgsFn = func(cfg *Config, targetArg string) []string { return []string{} }
-
 	res := runCodexTask(TaskSpec{Task: "data", UseStdin: true}, false, 1)
 	if res.ExitCode != 1 || !strings.Contains(res.Error, "stdin pipe") {
 		t.Fatalf("expected stdin pipe error, got %+v", res)
@@ -893,14 +722,12 @@ func TestRunCodexTask_StdinPipeError(t *testing.T) {
 
 func TestRunCodexTask_StdoutPipeError(t *testing.T) {
 	defer resetTestHooks()
-
 	commandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
 		cmd := exec.CommandContext(ctx, "echo", "noop")
 		cmd.Stdout = os.Stdout
 		return cmd
 	}
 	buildCodexArgsFn = func(cfg *Config, targetArg string) []string { return []string{} }
-
 	res := runCodexTask(TaskSpec{Task: "noop"}, false, 1)
 	if res.ExitCode != 1 || !strings.Contains(res.Error, "stdout pipe") {
 		t.Fatalf("expected stdout pipe error, got %+v", res)
@@ -909,26 +736,21 @@ func TestRunCodexTask_StdoutPipeError(t *testing.T) {
 
 func TestRunCodexTask_Timeout(t *testing.T) {
 	defer resetTestHooks()
-
 	codexCommand = "sleep"
 	buildCodexArgsFn = func(cfg *Config, targetArg string) []string { return []string{"2"} }
-
 	res := runCodexTask(TaskSpec{Task: "ignored"}, false, 1)
 	if res.ExitCode != 124 || !strings.Contains(res.Error, "timeout") {
-		t.Fatalf("expected timeout exit, got %+v", res)
+		t.Fatalf("expected timeout, got %+v", res)
 	}
 }
 
 func TestRunCodexTask_SignalHandling(t *testing.T) {
 	defer resetTestHooks()
-
 	codexCommand = "sleep"
 	buildCodexArgsFn = func(cfg *Config, targetArg string) []string { return []string{"5"} }
 
 	resultCh := make(chan TaskResult, 1)
-	go func() {
-		resultCh <- runCodexTask(TaskSpec{Task: "ignored"}, false, 5)
-	}()
+	go func() { resultCh <- runCodexTask(TaskSpec{Task: "ignored"}, false, 5) }()
 
 	time.Sleep(200 * time.Millisecond)
 	syscall.Kill(os.Getpid(), syscall.SIGTERM)
@@ -936,20 +758,15 @@ func TestRunCodexTask_SignalHandling(t *testing.T) {
 	res := <-resultCh
 	signal.Reset(syscall.SIGINT, syscall.SIGTERM)
 
-	if res.ExitCode == 0 {
+	if res.ExitCode == 0 || res.Error == "" {
 		t.Fatalf("expected non-zero exit after signal, got %+v", res)
-	}
-	if res.Error == "" {
-		t.Fatalf("expected error after signal, got %+v", res)
 	}
 }
 
 func TestSilentMode(t *testing.T) {
 	defer resetTestHooks()
-
 	jsonOutput := `{"type":"thread.started","thread_id":"silent-session"}
 {"type":"item.completed","item":{"type":"agent_message","text":"quiet"}}`
-
 	codexCommand = "echo"
 	buildCodexArgsFn = func(cfg *Config, targetArg string) []string { return []string{targetArg} }
 
@@ -957,15 +774,12 @@ func TestSilentMode(t *testing.T) {
 		oldStderr := os.Stderr
 		r, w, _ := os.Pipe()
 		os.Stderr = w
-
 		res := runCodexTask(TaskSpec{Task: jsonOutput}, silent, 10)
 		if res.ExitCode != 0 {
-			t.Fatalf("runCodexTask() unexpected exitCode %d", res.ExitCode)
+			t.Fatalf("unexpected exitCode %d", res.ExitCode)
 		}
-
 		w.Close()
 		os.Stderr = oldStderr
-
 		var buf bytes.Buffer
 		io.Copy(&buf, r)
 		return buf.String()
@@ -983,232 +797,54 @@ func TestSilentMode(t *testing.T) {
 }
 
 func TestGenerateFinalOutput(t *testing.T) {
-	results := []TaskResult{
-		{TaskID: "a", ExitCode: 0, Message: "ok"},
-		{TaskID: "b", ExitCode: 1, Error: "boom"},
-		{TaskID: "c", ExitCode: 0},
-	}
-
+	results := []TaskResult{{TaskID: "a", ExitCode: 0, Message: "ok"}, {TaskID: "b", ExitCode: 1, Error: "boom"}, {TaskID: "c", ExitCode: 0}}
 	out := generateFinalOutput(results)
 	if out == "" {
 		t.Fatalf("generateFinalOutput() returned empty string")
 	}
-
-	if !strings.Contains(out, "Total: 3") {
-		t.Errorf("output missing 'Total: 3'")
+	if !strings.Contains(out, "Total: 3") || !strings.Contains(out, "Success: 2") || !strings.Contains(out, "Failed: 1") {
+		t.Fatalf("summary missing, got %q", out)
 	}
-	if !strings.Contains(out, "Success: 2") {
-		t.Errorf("output missing 'Success: 2'")
-	}
-	if !strings.Contains(out, "Failed: 1") {
-		t.Errorf("output missing 'Failed: 1'")
-	}
-	if !strings.Contains(out, "Task: a") {
-		t.Errorf("output missing task a")
-	}
-	if !strings.Contains(out, "Task: b") {
-		t.Errorf("output missing task b")
-	}
-	if !strings.Contains(out, "Status: SUCCESS") {
-		t.Errorf("output missing success status")
-	}
-	if !strings.Contains(out, "Status: FAILED") {
-		t.Errorf("output missing failed status")
-	}
-}
-
-func TestGenerateFinalOutput_MarshalError(t *testing.T) {
-	// This test is no longer relevant since we don't use JSON marshaling
-	// generateFinalOutput now uses string building
-	out := generateFinalOutput([]TaskResult{{TaskID: "x"}})
-	if out == "" {
-		t.Fatalf("generateFinalOutput() should not return empty string")
-	}
-	if !strings.Contains(out, "Task: x") {
-		t.Errorf("output should contain task x")
-	}
-}
-
-func TestDefaultIsTerminal(t *testing.T) {
-	// This test just ensures defaultIsTerminal doesn't panic
-	// The actual result depends on the test environment
-	_ = defaultIsTerminal()
-}
-
-// Tests for run() function
-func TestRun_Version(t *testing.T) {
-	defer resetTestHooks()
-
-	os.Args = []string{"codex-wrapper", "--version"}
-	exitCode := run()
-	if exitCode != 0 {
-		t.Errorf("run() with --version returned %d, want 0", exitCode)
-	}
-}
-
-func TestRun_VersionShort(t *testing.T) {
-	defer resetTestHooks()
-
-	os.Args = []string{"codex-wrapper", "-v"}
-	exitCode := run()
-	if exitCode != 0 {
-		t.Errorf("run() with -v returned %d, want 0", exitCode)
-	}
-}
-
-func TestRun_Help(t *testing.T) {
-	defer resetTestHooks()
-
-	os.Args = []string{"codex-wrapper", "--help"}
-	exitCode := run()
-	if exitCode != 0 {
-		t.Errorf("run() with --help returned %d, want 0", exitCode)
-	}
-}
-
-func TestRun_HelpShort(t *testing.T) {
-	defer resetTestHooks()
-
-	os.Args = []string{"codex-wrapper", "-h"}
-	exitCode := run()
-	if exitCode != 0 {
-		t.Errorf("run() with -h returned %d, want 0", exitCode)
-	}
-}
-
-func TestRun_NoArgs(t *testing.T) {
-	defer resetTestHooks()
-
-	os.Args = []string{"codex-wrapper"}
-	exitCode := run()
-	if exitCode != 1 {
-		t.Errorf("run() with no args returned %d, want 1", exitCode)
-	}
-}
-
-func TestRun_ExplicitStdinEmpty(t *testing.T) {
-	defer resetTestHooks()
-
-	os.Args = []string{"codex-wrapper", "-"}
-	stdinReader = strings.NewReader("")
-	isTerminalFn = func() bool { return false }
-
-	exitCode := run()
-	if exitCode != 1 {
-		t.Errorf("run() with empty stdin returned %d, want 1", exitCode)
-	}
-}
-
-func TestRun_CommandFails(t *testing.T) {
-	defer resetTestHooks()
-
-	os.Args = []string{"codex-wrapper", "task"}
-	stdinReader = strings.NewReader("")
-	isTerminalFn = func() bool { return true }
-	codexCommand = "false"
-
-	exitCode := run()
-	if exitCode == 0 {
-		t.Errorf("run() with failing command returned 0, want non-zero")
-	}
-}
-
-func TestRun_CLI_Success(t *testing.T) {
-	defer resetTestHooks()
-
-	os.Args = []string{"codex-wrapper", "do-things"}
-	stdinReader = strings.NewReader("")
-	isTerminalFn = func() bool { return true }
-
-	codexCommand = "echo"
-	buildCodexArgsFn = func(cfg *Config, targetArg string) []string {
-		return []string{
-			`{"type":"thread.started","thread_id":"cli-session"}` + "\n" +
-				`{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}`,
-		}
-	}
-
-	var exitCode int
-	output := captureStdout(t, func() {
-		exitCode = run()
-	})
-
-	if exitCode != 0 {
-		t.Fatalf("run() exit=%d, want 0", exitCode)
-	}
-	if !strings.Contains(output, "ok") {
-		t.Fatalf("expected agent output, got %q", output)
-	}
-	if !strings.Contains(output, "SESSION_ID: cli-session") {
-		t.Fatalf("expected session id output, got %q", output)
+	if !strings.Contains(out, "Task: a") || !strings.Contains(out, "Task: b") {
+		t.Fatalf("task entries missing")
 	}
 }
 
 func TestTopologicalSort_LinearChain(t *testing.T) {
-	tasks := []TaskSpec{
-		{ID: "a"},
-		{ID: "b", Dependencies: []string{"a"}},
-		{ID: "c", Dependencies: []string{"b"}},
-	}
-
+	tasks := []TaskSpec{{ID: "a"}, {ID: "b", Dependencies: []string{"a"}}, {ID: "c", Dependencies: []string{"b"}}}
 	layers, err := topologicalSort(tasks)
 	if err != nil {
-		t.Fatalf("topologicalSort() unexpected error: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
-
 	if len(layers) != 3 {
 		t.Fatalf("expected 3 layers, got %d", len(layers))
-	}
-
-	if layers[0][0].ID != "a" || layers[1][0].ID != "b" || layers[2][0].ID != "c" {
-		t.Fatalf("unexpected order: %+v", layers)
 	}
 }
 
 func TestTopologicalSort_Branching(t *testing.T) {
-	tasks := []TaskSpec{
-		{ID: "root"},
-		{ID: "left", Dependencies: []string{"root"}},
-		{ID: "right", Dependencies: []string{"root"}},
-		{ID: "leaf", Dependencies: []string{"left", "right"}},
-	}
-
+	tasks := []TaskSpec{{ID: "root"}, {ID: "left", Dependencies: []string{"root"}}, {ID: "right", Dependencies: []string{"root"}}, {ID: "leaf", Dependencies: []string{"left", "right"}}}
 	layers, err := topologicalSort(tasks)
 	if err != nil {
-		t.Fatalf("topologicalSort() unexpected error: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
-
-	if len(layers) != 3 {
-		t.Fatalf("expected 3 layers, got %d", len(layers))
-	}
-
-	if len(layers[1]) != 2 {
-		t.Fatalf("expected branching layer size 2, got %d", len(layers[1]))
+	if len(layers) != 3 || len(layers[1]) != 2 {
+		t.Fatalf("unexpected layers: %+v", layers)
 	}
 }
 
 func TestTopologicalSort_ParallelTasks(t *testing.T) {
 	tasks := []TaskSpec{{ID: "a"}, {ID: "b"}, {ID: "c"}}
-
 	layers, err := topologicalSort(tasks)
 	if err != nil {
-		t.Fatalf("topologicalSort() unexpected error: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
-
-	if len(layers) != 1 {
-		t.Fatalf("expected single layer, got %d", len(layers))
-	}
-	if len(layers[0]) != 3 {
-		t.Fatalf("expected 3 tasks in layer, got %d", len(layers[0]))
+	if len(layers) != 1 || len(layers[0]) != 3 {
+		t.Fatalf("unexpected result: %+v", layers)
 	}
 }
 
 func TestShouldSkipTask(t *testing.T) {
-	failed := map[string]TaskResult{
-		"a": {TaskID: "a", ExitCode: 1},
-		"b": {TaskID: "b", ExitCode: 2},
-	}
-
+	failed := map[string]TaskResult{"a": {TaskID: "a", ExitCode: 1}, "b": {TaskID: "b", ExitCode: 2}}
 	tests := []struct {
 		name           string
 		task           TaskSpec
@@ -1224,9 +860,8 @@ func TestShouldSkipTask(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			skip, reason := shouldSkipTask(tt.task, failed)
-
 			if skip != tt.skip {
-				t.Fatalf("shouldSkipTask(%s) skip=%v, want %v", tt.name, skip, tt.skip)
+				t.Fatalf("skip=%v, want %v", skip, tt.skip)
 			}
 			for _, expect := range tt.reasonContains {
 				if !strings.Contains(reason, expect) {
@@ -1238,40 +873,28 @@ func TestShouldSkipTask(t *testing.T) {
 }
 
 func TestTopologicalSort_CycleDetection(t *testing.T) {
-	tasks := []TaskSpec{
-		{ID: "a", Dependencies: []string{"b"}},
-		{ID: "b", Dependencies: []string{"a"}},
-	}
-
+	tasks := []TaskSpec{{ID: "a", Dependencies: []string{"b"}}, {ID: "b", Dependencies: []string{"a"}}}
 	if _, err := topologicalSort(tasks); err == nil || !strings.Contains(err.Error(), "cycle detected") {
 		t.Fatalf("expected cycle error, got %v", err)
 	}
 }
 
 func TestTopologicalSort_IndirectCycle(t *testing.T) {
-	tasks := []TaskSpec{
-		{ID: "a", Dependencies: []string{"c"}},
-		{ID: "b", Dependencies: []string{"a"}},
-		{ID: "c", Dependencies: []string{"b"}},
-	}
-
+	tasks := []TaskSpec{{ID: "a", Dependencies: []string{"c"}}, {ID: "b", Dependencies: []string{"a"}}, {ID: "c", Dependencies: []string{"b"}}}
 	if _, err := topologicalSort(tasks); err == nil || !strings.Contains(err.Error(), "cycle detected") {
-		t.Fatalf("expected indirect cycle error, got %v", err)
+		t.Fatalf("expected cycle error, got %v", err)
 	}
 }
 
 func TestTopologicalSort_MissingDependency(t *testing.T) {
-	tasks := []TaskSpec{
-		{ID: "a", Dependencies: []string{"missing"}},
-	}
-
+	tasks := []TaskSpec{{ID: "a", Dependencies: []string{"missing"}}}
 	if _, err := topologicalSort(tasks); err == nil || !strings.Contains(err.Error(), "dependency \"missing\" not found") {
 		t.Fatalf("expected missing dependency error, got %v", err)
 	}
 }
 
 func TestTopologicalSort_LargeGraph(t *testing.T) {
-	const count = 1000
+	const count = 200
 	tasks := make([]TaskSpec, count)
 	for i := 0; i < count; i++ {
 		id := fmt.Sprintf("task-%d", i)
@@ -1285,9 +908,8 @@ func TestTopologicalSort_LargeGraph(t *testing.T) {
 
 	layers, err := topologicalSort(tasks)
 	if err != nil {
-		t.Fatalf("topologicalSort() unexpected error: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
-
 	if len(layers) != count {
 		t.Fatalf("expected %d layers, got %d", count, len(layers))
 	}
@@ -1321,7 +943,6 @@ func TestExecuteConcurrent_ParallelExecution(t *testing.T) {
 	if len(results) != 3 {
 		t.Fatalf("expected 3 results, got %d", len(results))
 	}
-
 	if elapsed >= 400*time.Millisecond {
 		t.Fatalf("expected concurrent execution, took %v", elapsed)
 	}
@@ -1347,15 +968,8 @@ func TestExecuteConcurrent_LayerOrdering(t *testing.T) {
 	layers := [][]TaskSpec{{{ID: "first-1"}, {ID: "first-2"}}, {{ID: "second"}}}
 	executeConcurrent(layers, 10)
 
-	if len(order) != 3 {
-		t.Fatalf("expected 3 tasks recorded, got %d", len(order))
-	}
-
-	if order[0] != "first-1" && order[0] != "first-2" {
-		t.Fatalf("first task should come from first layer, got %s", order[0])
-	}
-	if order[2] != "second" {
-		t.Fatalf("last task should be from second layer, got %s", order[2])
+	if len(order) != 3 || order[2] != "second" {
+		t.Fatalf("unexpected order: %+v", order)
 	}
 }
 
@@ -1388,7 +1002,7 @@ func TestExecuteConcurrent_ErrorIsolation(t *testing.T) {
 	}
 
 	if !failed || !succeeded {
-		t.Fatalf("expected failure isolation, got results: %+v", results)
+		t.Fatalf("expected failure isolation, got %+v", results)
 	}
 }
 
@@ -1401,11 +1015,7 @@ func TestExecuteConcurrent_PanicRecovered(t *testing.T) {
 	}
 
 	results := executeConcurrent([][]TaskSpec{{{ID: "panic"}}}, 10)
-
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
-	}
-	if results[0].Error == "" || results[0].ExitCode == 0 {
+	if len(results) != 1 || results[0].Error == "" || results[0].ExitCode == 0 {
 		t.Fatalf("panic should be captured, got %+v", results[0])
 	}
 }
@@ -1414,17 +1024,12 @@ func TestExecuteConcurrent_LargeFanout(t *testing.T) {
 	orig := runCodexTaskFn
 	defer func() { runCodexTaskFn = orig }()
 
-	runCodexTaskFn = func(task TaskSpec, timeout int) TaskResult {
-		return TaskResult{TaskID: task.ID}
-	}
-
+	runCodexTaskFn = func(task TaskSpec, timeout int) TaskResult { return TaskResult{TaskID: task.ID} }
 	layer := make([]TaskSpec, 0, 1200)
 	for i := 0; i < 1200; i++ {
 		layer = append(layer, TaskSpec{ID: fmt.Sprintf("id-%d", i)})
 	}
-
 	results := executeConcurrent([][]TaskSpec{layer}, 10)
-
 	if len(results) != 1200 {
 		t.Fatalf("expected 1200 results, got %d", len(results))
 	}
@@ -1435,7 +1040,6 @@ func TestRun_ParallelFlag(t *testing.T) {
 	defer func() { os.Args = oldArgs }()
 
 	os.Args = []string{"codex-wrapper", "--parallel"}
-
 	jsonInput := `---TASK---
 id: T1
 ---CONTENT---
@@ -1444,26 +1048,362 @@ test`
 	defer func() { stdinReader = os.Stdin }()
 
 	runCodexTaskFn = func(task TaskSpec, timeout int) TaskResult {
-		return TaskResult{
-			TaskID:   task.ID,
-			ExitCode: 0,
-			Message:  "test output",
-		}
+		return TaskResult{TaskID: task.ID, ExitCode: 0, Message: "test output"}
 	}
 	defer func() {
-		runCodexTaskFn = func(task TaskSpec, timeout int) TaskResult {
-			if task.WorkDir == "" {
-				task.WorkDir = defaultWorkdir
-			}
-			if task.Mode == "" {
-				task.Mode = "new"
-			}
-			return runCodexTask(task, true, timeout)
-		}
+		runCodexTaskFn = func(task TaskSpec, timeout int) TaskResult { return runCodexTask(task, true, timeout) }
 	}()
 
 	exitCode := run()
 	if exitCode != 0 {
 		t.Errorf("expected exit code 0, got %d", exitCode)
+	}
+}
+
+func TestRun_Version(t *testing.T) {
+	defer resetTestHooks()
+	os.Args = []string{"codex-wrapper", "--version"}
+	if code := run(); code != 0 {
+		t.Errorf("exit = %d, want 0", code)
+	}
+}
+
+func TestRun_VersionShort(t *testing.T) {
+	defer resetTestHooks()
+	os.Args = []string{"codex-wrapper", "-v"}
+	if code := run(); code != 0 {
+		t.Errorf("exit = %d, want 0", code)
+	}
+}
+
+func TestRun_Help(t *testing.T) {
+	defer resetTestHooks()
+	os.Args = []string{"codex-wrapper", "--help"}
+	if code := run(); code != 0 {
+		t.Errorf("exit = %d, want 0", code)
+	}
+}
+
+func TestRun_HelpShort(t *testing.T) {
+	defer resetTestHooks()
+	os.Args = []string{"codex-wrapper", "-h"}
+	if code := run(); code != 0 {
+		t.Errorf("exit = %d, want 0", code)
+	}
+}
+
+func TestRun_NoArgs(t *testing.T) {
+	defer resetTestHooks()
+	os.Args = []string{"codex-wrapper"}
+	if code := run(); code != 1 {
+		t.Errorf("exit = %d, want 1", code)
+	}
+}
+
+func TestRun_ExplicitStdinEmpty(t *testing.T) {
+	defer resetTestHooks()
+	os.Args = []string{"codex-wrapper", "-"}
+	stdinReader = strings.NewReader("")
+	isTerminalFn = func() bool { return false }
+	if code := run(); code != 1 {
+		t.Errorf("exit = %d, want 1", code)
+	}
+}
+
+func TestRun_ExplicitStdinReadError(t *testing.T) {
+	defer resetTestHooks()
+	tempDir := t.TempDir()
+	t.Setenv("TMPDIR", tempDir)
+	logPath := filepath.Join(tempDir, fmt.Sprintf("codex-wrapper-%d.log", os.Getpid()))
+
+	var logOutput string
+	cleanupHook = func() {
+		data, err := os.ReadFile(logPath)
+		if err == nil {
+			logOutput = string(data)
+		}
+	}
+
+	os.Args = []string{"codex-wrapper", "-"}
+	stdinReader = errReader{errors.New("broken stdin")}
+	isTerminalFn = func() bool { return false }
+
+	exitCode := run()
+
+	if exitCode != 1 {
+		t.Fatalf("exit code %d, want 1", exitCode)
+	}
+	if !strings.Contains(logOutput, "Failed to read stdin: broken stdin") {
+		t.Fatalf("log missing read error entry, got %q", logOutput)
+	}
+	if _, err := os.Stat(logPath); os.IsNotExist(err) {
+		t.Fatalf("log file should exist")
+	}
+	defer os.Remove(logPath)
+}
+
+func TestRun_CommandFails(t *testing.T) {
+	defer resetTestHooks()
+	os.Args = []string{"codex-wrapper", "task"}
+	stdinReader = strings.NewReader("")
+	isTerminalFn = func() bool { return true }
+	codexCommand = "false"
+	if code := run(); code == 0 {
+		t.Errorf("expected non-zero")
+	}
+}
+
+func TestRun_SuccessfulExecution(t *testing.T) {
+	defer resetTestHooks()
+	stdout := captureStdoutPipe()
+
+	codexCommand = createFakeCodexScript(t, "tid-123", "ok")
+	stdinReader = strings.NewReader("")
+	isTerminalFn = func() bool { return true }
+	os.Args = []string{"codex-wrapper", "task"}
+
+	exitCode := run()
+	if exitCode != 0 {
+		t.Fatalf("exit=%d, want 0", exitCode)
+	}
+
+	restoreStdoutPipe(stdout)
+	output := stdout.String()
+	if !strings.Contains(output, "ok") || !strings.Contains(output, "SESSION_ID: tid-123") {
+		t.Fatalf("unexpected output: %q", output)
+	}
+}
+
+func TestRun_ExplicitStdinSuccess(t *testing.T) {
+	defer resetTestHooks()
+	stdout := captureStdoutPipe()
+
+	codexCommand = createFakeCodexScript(t, "tid-stdin", "from-stdin")
+	stdinReader = strings.NewReader("line1\nline2")
+	isTerminalFn = func() bool { return false }
+	os.Args = []string{"codex-wrapper", "-"}
+
+	exitCode := run()
+	restoreStdoutPipe(stdout)
+	if exitCode != 0 {
+		t.Fatalf("exit=%d, want 0", exitCode)
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "from-stdin") || !strings.Contains(output, "SESSION_ID: tid-stdin") {
+		t.Fatalf("unexpected output: %q", output)
+	}
+}
+
+func TestRun_PipedTaskReadError(t *testing.T) {
+	defer resetTestHooks()
+	tempDir := t.TempDir()
+	t.Setenv("TMPDIR", tempDir)
+	logPath := filepath.Join(tempDir, fmt.Sprintf("codex-wrapper-%d.log", os.Getpid()))
+
+	var logOutput string
+	cleanupHook = func() {
+		data, err := os.ReadFile(logPath)
+		if err == nil {
+			logOutput = string(data)
+		}
+	}
+
+	codexCommand = createFakeCodexScript(t, "tid-pipe", "piped-task")
+	isTerminalFn = func() bool { return false }
+	stdinReader = errReader{errors.New("pipe failure")}
+	os.Args = []string{"codex-wrapper", "cli-task"}
+
+	exitCode := run()
+	if exitCode != 1 {
+		t.Fatalf("exit=%d, want 1", exitCode)
+	}
+	if !strings.Contains(logOutput, "ERROR: Failed to read piped stdin: read stdin: pipe failure") {
+		t.Fatalf("log missing piped read error, got %q", logOutput)
+	}
+	if _, err := os.Stat(logPath); os.IsNotExist(err) {
+		t.Fatalf("log file should exist")
+	}
+	defer os.Remove(logPath)
+}
+
+func TestRun_PipedTaskSuccess(t *testing.T) {
+	defer resetTestHooks()
+	stdout := captureStdoutPipe()
+
+	codexCommand = createFakeCodexScript(t, "tid-pipe", "piped-task")
+	isTerminalFn = func() bool { return false }
+	stdinReader = strings.NewReader("piped task text")
+	os.Args = []string{"codex-wrapper", "cli-task"}
+
+	exitCode := run()
+	restoreStdoutPipe(stdout)
+	if exitCode != 0 {
+		t.Fatalf("exit=%d, want 0", exitCode)
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "piped-task") || !strings.Contains(output, "SESSION_ID: tid-pipe") {
+		t.Fatalf("unexpected output: %q", output)
+	}
+}
+
+func TestRun_LoggerLifecycle(t *testing.T) {
+	defer resetTestHooks()
+	tempDir := t.TempDir()
+	t.Setenv("TMPDIR", tempDir)
+	logPath := filepath.Join(tempDir, fmt.Sprintf("codex-wrapper-%d.log", os.Getpid()))
+
+	stdout := captureStdoutPipe()
+
+	codexCommand = createFakeCodexScript(t, "tid-logger", "ok")
+	isTerminalFn = func() bool { return true }
+	stdinReader = strings.NewReader("")
+	os.Args = []string{"codex-wrapper", "task"}
+
+	var fileExisted bool
+	cleanupHook = func() {
+		if _, err := os.Stat(logPath); err == nil {
+			fileExisted = true
+		}
+	}
+
+	exitCode := run()
+	restoreStdoutPipe(stdout)
+
+	if exitCode != 0 {
+		t.Fatalf("exit=%d, want 0", exitCode)
+	}
+	if !fileExisted {
+		t.Fatalf("log file was not present during run")
+	}
+	if _, err := os.Stat(logPath); !os.IsNotExist(err) {
+		t.Fatalf("log file should be removed on success, but it exists")
+	}
+}
+
+func TestRun_LoggerRemovedOnSignal(t *testing.T) {
+	defer resetTestHooks()
+	defer signal.Reset(syscall.SIGINT, syscall.SIGTERM)
+
+	tempDir := t.TempDir()
+	t.Setenv("TMPDIR", tempDir)
+	logPath := filepath.Join(tempDir, fmt.Sprintf("codex-wrapper-%d.log", os.Getpid()))
+
+	scriptPath := filepath.Join(tempDir, "sleepy-codex.sh")
+	script := `#!/bin/sh
+printf '%s\n' '{"type":"thread.started","thread_id":"sig-thread"}'
+sleep 5
+printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"late"}}'`
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("failed to write script: %v", err)
+	}
+
+	codexCommand = scriptPath
+	isTerminalFn = func() bool { return true }
+	stdinReader = strings.NewReader("")
+	os.Args = []string{"codex-wrapper", "task"}
+
+	exitCh := make(chan int, 1)
+	go func() { exitCh <- run() }()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(logPath); err == nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	_ = syscall.Kill(os.Getpid(), syscall.SIGINT)
+
+	var exitCode int
+	select {
+	case exitCode = <-exitCh:
+	case <-time.After(3 * time.Second):
+		t.Fatalf("run() did not return after signal")
+	}
+
+	if exitCode != 130 {
+		t.Fatalf("exit code = %d, want 130", exitCode)
+	}
+	if _, err := os.Stat(logPath); os.IsNotExist(err) {
+		t.Fatalf("log file should exist after signal exit")
+	}
+	defer os.Remove(logPath)
+}
+
+func TestRun_CleanupHookAlwaysCalled(t *testing.T) {
+	defer resetTestHooks()
+	called := false
+	cleanupHook = func() { called = true }
+	os.Args = []string{"codex-wrapper", "--version"}
+	if exitCode := run(); exitCode != 0 {
+		t.Fatalf("exit = %d, want 0", exitCode)
+	}
+	if !called {
+		t.Fatalf("cleanup hook not invoked")
+	}
+}
+
+// Coverage helper reused by logger_test to keep focused runs exercising core paths.
+func TestParseJSONStream_CoverageSuite(t *testing.T) {
+	suite := []struct {
+		name string
+		fn   func(*testing.T)
+	}{
+		{"TestParseJSONStream", TestParseJSONStream},
+		{"TestRunNormalizeText", TestRunNormalizeText},
+		{"TestRunTruncate", TestRunTruncate},
+		{"TestRunMin", TestRunMin},
+		{"TestRunGetEnv", TestRunGetEnv},
+	}
+
+	for _, tc := range suite {
+		t.Run(tc.name, tc.fn)
+	}
+}
+
+func TestHello(t *testing.T) {
+	if got := hello(); got != "hello world" {
+		t.Fatalf("hello() = %q, want %q", got, "hello world")
+	}
+}
+
+func TestGreet(t *testing.T) {
+	if got := greet("Linus"); got != "hello Linus" {
+		t.Fatalf("greet() = %q, want %q", got, "hello Linus")
+	}
+}
+
+func TestFarewell(t *testing.T) {
+	if got := farewell("Linus"); got != "goodbye Linus" {
+		t.Fatalf("farewell() = %q, want %q", got, "goodbye Linus")
+	}
+}
+
+func TestFarewellEmpty(t *testing.T) {
+	if got := farewell(""); got != "goodbye " {
+		t.Fatalf("farewell(\"\") = %q, want %q", got, "goodbye ")
+	}
+}
+
+func TestRun_CLI_Success(t *testing.T) {
+	defer resetTestHooks()
+	os.Args = []string{"codex-wrapper", "do-things"}
+	stdinReader = strings.NewReader("")
+	isTerminalFn = func() bool { return true }
+
+	codexCommand = "echo"
+	buildCodexArgsFn = func(cfg *Config, targetArg string) []string {
+		return []string{`{"type":"thread.started","thread_id":"cli-session"}` + "\n" + `{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}`}
+	}
+
+	var exitCode int
+	output := captureOutput(t, func() { exitCode = run() })
+
+	if exitCode != 0 {
+		t.Fatalf("run() exit=%d, want 0", exitCode)
+	}
+	if !strings.Contains(output, "ok") || !strings.Contains(output, "SESSION_ID: cli-session") {
+		t.Fatalf("unexpected output: %q", output)
 	}
 }

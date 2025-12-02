@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,27 +15,32 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
 
 const (
-	version            = "1.0.0"
+	version            = "4.8.2"
 	defaultWorkdir     = "."
 	defaultTimeout     = 7200 // seconds
 	forceKillDelay     = 5    // seconds
+	codexLogLineLimit  = 1000
 	stdinSpecialChars  = "\n\\\"'`$"
 	stderrCaptureLimit = 4 * 1024
 )
 
 // Test hooks for dependency injection
 var (
-	stdinReader      io.Reader = os.Stdin
-	isTerminalFn               = defaultIsTerminal
-	codexCommand               = "codex"
-	buildCodexArgsFn           = buildCodexArgs
-	commandContext             = exec.CommandContext
-	jsonMarshal                = json.Marshal
+	stdinReader  io.Reader = os.Stdin
+	isTerminalFn           = defaultIsTerminal
+	codexCommand           = "codex"
+	cleanupHook  func()
+	loggerPtr    atomic.Pointer[Logger]
+
+	buildCodexArgsFn = buildCodexArgs
+	commandContext   = exec.CommandContext
+	jsonMarshal      = json.Marshal
 )
 
 // Config holds CLI configuration
@@ -353,7 +359,32 @@ func main() {
 }
 
 // run is the main logic, returns exit code for testability
-func run() int {
+func run() (exitCode int) {
+	logger, err := NewLogger()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ERROR: failed to initialize logger: %v\n", err)
+		return 1
+	}
+	setLogger(logger)
+
+	defer func() {
+		logger := activeLogger()
+		if logger != nil {
+			logger.Flush()
+		}
+		if err := closeLogger(); err != nil {
+			fmt.Fprintf(os.Stderr, "ERROR: failed to close logger: %v\n", err)
+		}
+		if exitCode == 0 && logger != nil {
+			if err := logger.RemoveLogFile(); err != nil && !os.IsNotExist(err) {
+				fmt.Fprintf(os.Stderr, "ERROR: failed to remove logger file: %v\n", err)
+			}
+		} else if exitCode != 0 && logger != nil {
+			fmt.Fprintf(os.Stderr, "Log file retained at: %s\n", logger.Path())
+		}
+	}()
+	defer runCleanupHook()
+
 	// Handle --version and --help first
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
@@ -372,7 +403,6 @@ func run() int {
 				fmt.Fprintln(os.Stderr, "  codex-wrapper --parallel <<'EOF'")
 				return 1
 			}
-			// Parallel mode: read task config from stdin
 			data, err := io.ReadAll(stdinReader)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "ERROR: failed to read stdin: %v\n", err)
@@ -395,7 +425,7 @@ func run() int {
 			results := executeConcurrent(layers, timeoutSec)
 			fmt.Println(generateFinalOutput(results))
 
-			exitCode := 0
+			exitCode = 0
 			for _, res := range results {
 				if res.ExitCode != 0 {
 					exitCode = res.ExitCode
@@ -419,7 +449,6 @@ func run() int {
 	logInfo(fmt.Sprintf("Timeout: %ds", timeoutSec))
 	cfg.Timeout = timeoutSec
 
-	// Determine task text and stdin mode
 	var taskText string
 	var piped bool
 
@@ -437,7 +466,11 @@ func run() int {
 		}
 		piped = !isTerminal()
 	} else {
-		pipedTask := readPipedTask()
+		pipedTask, err := readPipedTask()
+		if err != nil {
+			logError("Failed to read piped stdin: " + err.Error())
+			return 1
+		}
 		piped = pipedTask != ""
 		if piped {
 			taskText = pipedTask
@@ -498,10 +531,7 @@ func run() int {
 		return result.ExitCode
 	}
 
-	// Output agent_message
 	fmt.Println(result.Message)
-
-	// Output session_id if present
 	if result.SessionID != "" {
 		fmt.Printf("\n---\nSESSION_ID: %s\n", result.SessionID)
 	}
@@ -515,11 +545,8 @@ func parseArgs() (*Config, error) {
 		return nil, fmt.Errorf("task required")
 	}
 
-	cfg := &Config{
-		WorkDir: defaultWorkdir,
-	}
+	cfg := &Config{WorkDir: defaultWorkdir}
 
-	// Check for resume mode
 	if args[0] == "resume" {
 		if len(args) < 3 {
 			return nil, fmt.Errorf("resume mode requires: resume <session_id> <task>")
@@ -543,19 +570,22 @@ func parseArgs() (*Config, error) {
 	return cfg, nil
 }
 
-func readPipedTask() string {
+func readPipedTask() (string, error) {
 	if isTerminal() {
 		logInfo("Stdin is tty, skipping pipe read")
-		return ""
+		return "", nil
 	}
 	logInfo("Reading from stdin pipe...")
 	data, err := io.ReadAll(stdinReader)
-	if err != nil || len(data) == 0 {
+	if err != nil {
+		return "", fmt.Errorf("read stdin: %w", err)
+	}
+	if len(data) == 0 {
 		logInfo("Stdin pipe returned empty data")
-		return ""
+		return "", nil
 	}
 	logInfo(fmt.Sprintf("Read %d bytes from stdin pipe", len(data)))
-	return string(data)
+	return string(data), nil
 }
 
 func shouldUseStdin(taskText string, piped bool) bool {
@@ -588,10 +618,22 @@ func buildCodexArgs(cfg *Config, targetArg string) []string {
 	}
 }
 
+type parseResult struct {
+	message  string
+	threadID string
+}
+
 func runCodexTask(taskSpec TaskSpec, silent bool, timeoutSec int) TaskResult {
-	result := TaskResult{
-		TaskID: taskSpec.ID,
-	}
+	return runCodexTaskWithContext(context.Background(), taskSpec, nil, false, silent, timeoutSec)
+}
+
+func runCodexProcess(parentCtx context.Context, codexArgs []string, taskText string, useStdin bool, timeoutSec int) (message, threadID string, exitCode int) {
+	res := runCodexTaskWithContext(parentCtx, TaskSpec{Task: taskText, WorkDir: defaultWorkdir, Mode: "new", UseStdin: useStdin}, codexArgs, true, false, timeoutSec)
+	return res.Message, res.SessionID, res.ExitCode
+}
+
+func runCodexTaskWithContext(parentCtx context.Context, taskSpec TaskSpec, customArgs []string, useCustomArgs bool, silent bool, timeoutSec int) TaskResult {
+	result := TaskResult{TaskID: taskSpec.ID}
 
 	cfg := &Config{
 		Mode:      taskSpec.Mode,
@@ -612,31 +654,99 @@ func runCodexTask(taskSpec TaskSpec, silent bool, timeoutSec int) TaskResult {
 		targetArg = "-"
 	}
 
-	codexArgs := buildCodexArgsFn(cfg, targetArg)
-
-	logInfoFn := logInfo
-	logWarnFn := logWarn
-	logErrorFn := logError
-	stderrBuf := &tailBuffer{limit: stderrCaptureLimit}
-	stderrWriter := io.Writer(io.MultiWriter(os.Stderr, stderrBuf))
-	if silent {
-		logInfoFn = func(string) {}
-		logWarnFn = func(string) {}
-		logErrorFn = func(string) {}
-		stderrWriter = stderrBuf
+	var codexArgs []string
+	if useCustomArgs {
+		codexArgs = customArgs
+	} else {
+		codexArgs = buildCodexArgsFn(cfg, targetArg)
 	}
+
+	prefixMsg := func(msg string) string {
+		if taskSpec.ID == "" {
+			return msg
+		}
+		return fmt.Sprintf("[Task: %s] %s", taskSpec.ID, msg)
+	}
+
+	var logInfoFn func(string)
+	var logWarnFn func(string)
+	var logErrorFn func(string)
+
+	if silent {
+		// Silent mode: only persist to file when available; avoid stderr noise.
+		logInfoFn = func(msg string) {
+			if logger := activeLogger(); logger != nil {
+				logger.Info(prefixMsg(msg))
+			}
+		}
+		logWarnFn = func(msg string) {
+			if logger := activeLogger(); logger != nil {
+				logger.Warn(prefixMsg(msg))
+			}
+		}
+		logErrorFn = func(msg string) {
+			if logger := activeLogger(); logger != nil {
+				logger.Error(prefixMsg(msg))
+			}
+		}
+	} else {
+		logInfoFn = func(msg string) { logInfo(prefixMsg(msg)) }
+		logWarnFn = func(msg string) { logWarn(prefixMsg(msg)) }
+		logErrorFn = func(msg string) { logError(prefixMsg(msg)) }
+	}
+
+	stderrBuf := &tailBuffer{limit: stderrCaptureLimit}
+
+	var stdoutLogger *logWriter
+	var stderrLogger *logWriter
+
+	var tempLogger *Logger
+	if silent && activeLogger() == nil {
+		if l, err := NewLogger(); err == nil {
+			setLogger(l)
+			tempLogger = l
+		}
+	}
+	defer func() {
+		if tempLogger != nil {
+			closeLogger()
+		}
+	}()
+
+	if !silent {
+		stdoutLogger = newLogWriter("CODEX_STDOUT: ", codexLogLineLimit)
+		stderrLogger = newLogWriter("CODEX_STDERR: ", codexLogLineLimit)
+	}
+
+	ctx := parentCtx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
+	defer cancel()
+	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
 	attachStderr := func(msg string) string {
 		return fmt.Sprintf("%s; stderr: %s", msg, stderrBuf.String())
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSec)*time.Second)
-	defer cancel()
-
 	cmd := commandContext(ctx, codexCommand, codexArgs...)
-	cmd.Stderr = stderrWriter
 
-	// Setup stdin if needed
+	stderrWriters := []io.Writer{stderrBuf}
+	if stderrLogger != nil {
+		stderrWriters = append(stderrWriters, stderrLogger)
+	}
+	if !silent {
+		stderrWriters = append([]io.Writer{os.Stderr}, stderrWriters...)
+	}
+	if len(stderrWriters) == 1 {
+		cmd.Stderr = stderrWriters[0]
+	} else {
+		cmd.Stderr = io.MultiWriter(stderrWriters...)
+	}
+
 	var stdinPipe io.WriteCloser
 	var err error
 	if useStdin {
@@ -649,7 +759,6 @@ func runCodexTask(taskSpec TaskSpec, silent bool, timeoutSec int) TaskResult {
 		}
 	}
 
-	// Setup stdout
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		logErrorFn("Failed to create stdout pipe: " + err.Error())
@@ -658,9 +767,13 @@ func runCodexTask(taskSpec TaskSpec, silent bool, timeoutSec int) TaskResult {
 		return result
 	}
 
+	stdoutReader := io.Reader(stdout)
+	if stdoutLogger != nil {
+		stdoutReader = io.TeeReader(stdout, stdoutLogger)
+	}
+
 	logInfoFn(fmt.Sprintf("Starting codex with args: codex %s...", strings.Join(codexArgs[:min(5, len(codexArgs))], " ")))
 
-	// Start process
 	if err := cmd.Start(); err != nil {
 		if strings.Contains(err.Error(), "executable file not found") {
 			logErrorFn("codex command not found in PATH")
@@ -673,59 +786,86 @@ func runCodexTask(taskSpec TaskSpec, silent bool, timeoutSec int) TaskResult {
 		result.Error = attachStderr("failed to start codex: " + err.Error())
 		return result
 	}
-	logInfoFn(fmt.Sprintf("Process started with PID: %d", cmd.Process.Pid))
 
-	// Write to stdin if needed
+	logInfoFn(fmt.Sprintf("Starting codex with PID: %d", cmd.Process.Pid))
+	if logger := activeLogger(); logger != nil {
+		logInfoFn(fmt.Sprintf("Log capturing to: %s", logger.Path()))
+	}
+
 	if useStdin && stdinPipe != nil {
 		logInfoFn(fmt.Sprintf("Writing %d chars to stdin...", len(taskSpec.Task)))
-		go func() {
+		go func(data string) {
 			defer stdinPipe.Close()
-			io.WriteString(stdinPipe, taskSpec.Task)
-		}()
+			_, _ = io.WriteString(stdinPipe, data)
+		}(taskSpec.Task)
 		logInfoFn("Stdin closed")
 	}
 
-	forwardSignals(ctx, cmd, logErrorFn)
+	waitCh := make(chan error, 1)
+	go func() { waitCh <- cmd.Wait() }()
 
-	logInfoFn("Reading stdout...")
+	parseCh := make(chan parseResult, 1)
+	go func() {
+		msg, tid := parseJSONStreamWithLog(stdoutReader, logWarnFn, logInfoFn)
+		parseCh <- parseResult{message: msg, threadID: tid}
+	}()
 
-	// Parse JSON stream
-	message, threadID := parseJSONStreamWithWarn(stdout, logWarnFn)
+	var waitErr error
+	var forceKillTimer *time.Timer
 
-	// Wait for process to complete
-	err = cmd.Wait()
+	select {
+	case waitErr = <-waitCh:
+	case <-ctx.Done():
+		logErrorFn(cancelReason(ctx))
+		forceKillTimer = terminateProcess(cmd)
+		waitErr = <-waitCh
+	}
 
-	// Check for timeout
-	if ctx.Err() == context.DeadlineExceeded {
-		logErrorFn("Codex execution timeout")
-		if cmd.Process != nil {
-			cmd.Process.Kill()
+	if forceKillTimer != nil {
+		forceKillTimer.Stop()
+	}
+
+	parsed := <-parseCh
+
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		if errors.Is(ctxErr, context.DeadlineExceeded) {
+			result.ExitCode = 124
+			result.Error = attachStderr("codex execution timeout")
+			return result
 		}
-		result.ExitCode = 124
-		result.Error = attachStderr("codex execution timeout")
+		result.ExitCode = 130
+		result.Error = attachStderr("execution cancelled")
 		return result
 	}
 
-	// Check exit code
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+	if waitErr != nil {
+		if exitErr, ok := waitErr.(*exec.ExitError); ok {
 			code := exitErr.ExitCode()
 			logErrorFn(fmt.Sprintf("Codex exited with status %d", code))
 			result.ExitCode = code
 			result.Error = attachStderr(fmt.Sprintf("codex exited with status %d", code))
 			return result
 		}
-		logErrorFn("Codex error: " + err.Error())
+		logErrorFn("Codex error: " + waitErr.Error())
 		result.ExitCode = 1
-		result.Error = attachStderr("codex error: " + err.Error())
+		result.Error = attachStderr("codex error: " + waitErr.Error())
 		return result
 	}
 
+	message := parsed.message
+	threadID := parsed.threadID
 	if message == "" {
 		logErrorFn("Codex completed without agent_message output")
 		result.ExitCode = 1
 		result.Error = attachStderr("codex completed without agent_message output")
 		return result
+	}
+
+	if stdoutLogger != nil {
+		stdoutLogger.Flush()
+	}
+	if stderrLogger != nil {
+		stderrLogger.Flush()
 	}
 
 	result.ExitCode = 0
@@ -787,23 +927,59 @@ func forwardSignals(ctx context.Context, cmd *exec.Cmd, logErrorFn func(string))
 	}()
 }
 
+func cancelReason(ctx context.Context) string {
+	if ctx == nil {
+		return "Context cancelled"
+	}
+
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return "Codex execution timeout"
+	}
+
+	return "Execution cancelled, terminating codex process"
+}
+
+func terminateProcess(cmd *exec.Cmd) *time.Timer {
+	if cmd == nil || cmd.Process == nil {
+		return nil
+	}
+
+	_ = cmd.Process.Signal(syscall.SIGTERM)
+
+	return time.AfterFunc(time.Duration(forceKillDelay)*time.Second, func() {
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+	})
+}
+
 func parseJSONStream(r io.Reader) (message, threadID string) {
-	return parseJSONStreamWithWarn(r, logWarn)
+	return parseJSONStreamWithLog(r, logWarn, logInfo)
 }
 
 func parseJSONStreamWithWarn(r io.Reader, warnFn func(string)) (message, threadID string) {
+	return parseJSONStreamWithLog(r, warnFn, logInfo)
+}
+
+func parseJSONStreamWithLog(r io.Reader, warnFn func(string), infoFn func(string)) (message, threadID string) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
 
 	if warnFn == nil {
 		warnFn = func(string) {}
 	}
+	if infoFn == nil {
+		infoFn = func(string) {}
+	}
+
+	totalEvents := 0
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
 			continue
 		}
+		totalEvents++
 
 		var event JSONEvent
 		if err := json.Unmarshal([]byte(line), &event); err != nil {
@@ -811,24 +987,69 @@ func parseJSONStreamWithWarn(r io.Reader, warnFn func(string)) (message, threadI
 			continue
 		}
 
-		// Capture thread_id
-		if event.Type == "thread.started" {
-			threadID = event.ThreadID
+		var details []string
+		if event.ThreadID != "" {
+			details = append(details, fmt.Sprintf("thread_id=%s", event.ThreadID))
+		}
+		if event.Item != nil && event.Item.Type != "" {
+			details = append(details, fmt.Sprintf("item_type=%s", event.Item.Type))
+		}
+		if len(details) > 0 {
+			infoFn(fmt.Sprintf("Parsed event #%d type=%s (%s)", totalEvents, event.Type, strings.Join(details, ", ")))
+		} else {
+			infoFn(fmt.Sprintf("Parsed event #%d type=%s", totalEvents, event.Type))
 		}
 
-		// Capture agent_message
-		if event.Type == "item.completed" && event.Item != nil && event.Item.Type == "agent_message" {
-			if text := normalizeText(event.Item.Text); text != "" {
-				message = text
+		switch event.Type {
+		case "thread.started":
+			threadID = event.ThreadID
+			infoFn(fmt.Sprintf("thread.started event thread_id=%s", threadID))
+		case "item.completed":
+			var itemType string
+			var normalized string
+			if event.Item != nil {
+				itemType = event.Item.Type
+				normalized = normalizeText(event.Item.Text)
+			}
+			infoFn(fmt.Sprintf("item.completed event item_type=%s message_len=%d", itemType, len(normalized)))
+			if event.Item != nil && event.Item.Type == "agent_message" && normalized != "" {
+				message = normalized
 			}
 		}
 	}
 
-	if err := scanner.Err(); err != nil && err != io.EOF {
+	if err := scanner.Err(); err != nil && !errors.Is(err, io.EOF) {
 		warnFn("Read stdout error: " + err.Error())
 	}
 
+	infoFn(fmt.Sprintf("parseJSONStream completed: events=%d, message_len=%d, thread_id_found=%t", totalEvents, len(message), threadID != ""))
 	return message, threadID
+}
+
+func discardInvalidJSON(decoder *json.Decoder, reader *bufio.Reader) (*bufio.Reader, error) {
+	var buffered bytes.Buffer
+
+	if decoder != nil {
+		if buf := decoder.Buffered(); buf != nil {
+			_, _ = buffered.ReadFrom(buf)
+		}
+	}
+
+	line, err := reader.ReadBytes('\n')
+	buffered.Write(line)
+
+	data := buffered.Bytes()
+	newline := bytes.IndexByte(data, '\n')
+	if newline == -1 {
+		return reader, err
+	}
+
+	remaining := data[newline+1:]
+	if len(remaining) == 0 {
+		return reader, err
+	}
+
+	return bufio.NewReader(io.MultiReader(bytes.NewReader(remaining), reader)), err
 }
 
 func normalizeText(text interface{}) string {
@@ -860,7 +1081,6 @@ func resolveTimeout() int {
 		return defaultTimeout
 	}
 
-	// Environment variable is in milliseconds if > 10000, convert to seconds
 	if parsed > 10000 {
 		return parsed / 1000
 	}
@@ -886,9 +1106,70 @@ func getEnv(key, defaultValue string) string {
 	return defaultValue
 }
 
+type logWriter struct {
+	prefix string
+	maxLen int
+	buf    bytes.Buffer
+}
+
+func newLogWriter(prefix string, maxLen int) *logWriter {
+	if maxLen <= 0 {
+		maxLen = codexLogLineLimit
+	}
+	return &logWriter{prefix: prefix, maxLen: maxLen}
+}
+
+func (lw *logWriter) Write(p []byte) (int, error) {
+	if lw == nil {
+		return len(p), nil
+	}
+	total := len(p)
+	for len(p) > 0 {
+		if idx := bytes.IndexByte(p, '\n'); idx >= 0 {
+			lw.buf.Write(p[:idx])
+			lw.logLine(true)
+			p = p[idx+1:]
+			continue
+		}
+		lw.buf.Write(p)
+		break
+	}
+	return total, nil
+}
+
+func (lw *logWriter) Flush() {
+	if lw == nil || lw.buf.Len() == 0 {
+		return
+	}
+	lw.logLine(false)
+}
+
+func (lw *logWriter) logLine(force bool) {
+	if lw == nil {
+		return
+	}
+	line := lw.buf.String()
+	lw.buf.Reset()
+	if line == "" && !force {
+		return
+	}
+	if lw.maxLen > 0 && len(line) > lw.maxLen {
+		cutoff := lw.maxLen
+		if cutoff > 3 {
+			line = line[:cutoff-3] + "..."
+		} else {
+			line = line[:cutoff]
+		}
+	}
+	logInfo(lw.prefix + line)
+}
+
 func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
+	}
+	if maxLen < 0 {
+		return ""
 	}
 	return s[:maxLen] + "..."
 }
@@ -898,6 +1179,22 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func setLogger(l *Logger) {
+	loggerPtr.Store(l)
+}
+
+func closeLogger() error {
+	logger := loggerPtr.Swap(nil)
+	if logger == nil {
+		return nil
+	}
+	return logger.Close()
+}
+
+func activeLogger() *Logger {
+	return loggerPtr.Load()
 }
 
 func hello() string {
@@ -914,14 +1211,35 @@ func farewell(name string) string {
 
 func logInfo(msg string) {
 	fmt.Fprintf(os.Stderr, "INFO: %s\n", msg)
+
+	if logger := activeLogger(); logger != nil {
+		logger.Info(msg)
+	}
 }
 
 func logWarn(msg string) {
 	fmt.Fprintf(os.Stderr, "WARN: %s\n", msg)
+
+	if logger := activeLogger(); logger != nil {
+		logger.Warn(msg)
+	}
 }
 
 func logError(msg string) {
 	fmt.Fprintf(os.Stderr, "ERROR: %s\n", msg)
+
+	if logger := activeLogger(); logger != nil {
+		logger.Error(msg)
+	}
+}
+
+func runCleanupHook() {
+	if logger := activeLogger(); logger != nil {
+		logger.Flush()
+	}
+	if cleanupHook != nil {
+		cleanupHook()
+	}
 }
 
 func printHelp() {
