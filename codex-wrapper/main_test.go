@@ -28,6 +28,7 @@ func resetTestHooks() {
 	buildCodexArgsFn = buildCodexArgs
 	commandContext = exec.CommandContext
 	jsonMarshal = json.Marshal
+	forceKillDelay = 5
 	closeLogger()
 }
 
@@ -1285,6 +1286,9 @@ func TestRun_LoggerLifecycle(t *testing.T) {
 func TestRun_LoggerRemovedOnSignal(t *testing.T) {
 	defer resetTestHooks()
 	defer signal.Reset(syscall.SIGINT, syscall.SIGTERM)
+
+	// Set shorter force kill delay for faster test
+	forceKillDelay = 1
 
 	tempDir := t.TempDir()
 	t.Setenv("TMPDIR", tempDir)

@@ -24,7 +24,6 @@ const (
 	version            = "4.8.2"
 	defaultWorkdir     = "."
 	defaultTimeout     = 7200 // seconds
-	forceKillDelay     = 5    // seconds
 	codexLogLineLimit  = 1000
 	stdinSpecialChars  = "\n\\\"'`$"
 	stderrCaptureLimit = 4 * 1024
@@ -41,6 +40,7 @@ var (
 	buildCodexArgsFn = buildCodexArgs
 	commandContext   = exec.CommandContext
 	jsonMarshal      = json.Marshal
+	forceKillDelay   = 5 // seconds - made variable for testability
 )
 
 // Config holds CLI configuration
