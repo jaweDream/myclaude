@@ -15,6 +15,18 @@ Execute Codex CLI commands and parse structured JSON responses. Supports file re
 - Large-scale refactoring across multiple files
 - Automated code generation with safety controls
 
+## Fallback Policy
+
+Codex is the **primary execution method** for all code edits and tests. Direct execution is only permitted when:
+
+1. Codex is unavailable (service down, network issues)
+2. Codex fails **twice consecutively** on the same task
+
+When falling back to direct execution:
+- Log `CODEX_FALLBACK` with the reason
+- Retry Codex on the next task (don't permanently switch)
+- Document the fallback in the final summary
+
 ## Usage
 
 **Mandatory**: Run every automated invocation through the Bash tool in the foreground with **HEREDOC syntax** to avoid shell quoting issues, keeping the `timeout` parameter fixed at `7200000` milliseconds (do not change it or use any other entry point).
@@ -166,16 +178,148 @@ Add proper escaping and handle $variables correctly.
 EOF
 ```
 
-### Large Task Protocol
+### Parallel Execution
 
-- For every large task, first produce a canonical task list that enumerates the Task ID, description, file/directory scope, dependencies, test commands, and the expected Codex Bash invocation.
-- Tasks without dependencies should be executed concurrently via multiple foreground Bash calls (you can keep separate terminal windows) and each run must log start/end times plus any shared resource usage.
-- Reuse context aggressively (such as @spec.md or prior analysis output), and after concurrent execution finishes, reconcile against the task list to report which items completed and which slipped.
+> Important:
+> - `--parallel` only reads task definitions from stdin.
+> - It does not accept extra command-line arguments (no inline `workdir`, `task`, or other params).
+> - Put all task metadata and content in stdin; nothing belongs after `--parallel` on the command line.
 
-| ID | Description | Scope | Dependencies | Tests | Command |
-| --- | --- | --- | --- | --- | --- |
-| T1 | Review @spec.md to extract requirements | docs/, @spec.md | None | None | `codex-wrapper - <<'EOF'`<br/>`analyze requirements @spec.md`<br/>`EOF` |
-| T2 | Implement the module and add test cases | src/module | T1 | npm test -- --runInBand | `codex-wrapper - <<'EOF'`<br/>`implement and test @src/module`<br/>`EOF` |
+**Correct vs Incorrect Usage**
+
+**Correct:**
+```bash
+# Option 1: file redirection
+codex-wrapper --parallel < tasks.txt
+
+# Option 2: heredoc (recommended for multiple tasks)
+codex-wrapper --parallel <<'EOF'
+---TASK---
+id: task1
+workdir: /path/to/dir
+---CONTENT---
+task content
+EOF
+
+# Option 3: pipe
+echo "---TASK---..." | codex-wrapper --parallel
+```
+
+**Incorrect (will trigger shell parsing errors):**
+```bash
+# Bad: no extra args allowed after --parallel
+codex-wrapper --parallel - /path/to/dir <<'EOF'
+...
+EOF
+
+# Bad: --parallel does not take a task argument
+codex-wrapper --parallel "task description"
+
+# Bad: workdir must live inside the task config
+codex-wrapper --parallel /path/to/dir < tasks.txt
+```
+
+For multiple independent or dependent tasks, use `--parallel` mode with delimiter format:
+
+**Typical Workflow (analyze → implement → test, chained in a single parallel call)**:
+```bash
+codex-wrapper --parallel <<'EOF'
+---TASK---
+id: analyze_1732876800
+workdir: /home/user/project
+---CONTENT---
+analyze @spec.md and summarize API and UI requirements
+---TASK---
+id: implement_1732876801
+workdir: /home/user/project
+dependencies: analyze_1732876800
+---CONTENT---
+implement features from analyze_1732876800 summary in backend @services and frontend @ui
+---TASK---
+id: test_1732876802
+workdir: /home/user/project
+dependencies: implement_1732876801
+---CONTENT---
+add and run regression tests covering the new endpoints and UI flows
+EOF
+```
+A single `codex-wrapper --parallel` call schedules all three stages concurrently, using `dependencies` to enforce sequential ordering without multiple invocations.
+
+```bash
+codex-wrapper --parallel <<'EOF'
+---TASK---
+id: backend_1732876800
+workdir: /home/user/project/backend
+---CONTENT---
+implement /api/orders endpoints with validation and pagination
+---TASK---
+id: frontend_1732876801
+workdir: /home/user/project/frontend
+---CONTENT---
+build Orders page consuming /api/orders with loading/error states
+---TASK---
+id: tests_1732876802
+workdir: /home/user/project/tests
+dependencies: backend_1732876800, frontend_1732876801
+---CONTENT---
+run API contract tests and UI smoke tests (waits for backend+frontend)
+EOF
+```
+
+**Delimiter Format**:
+- `---TASK---`: Starts a new task block
+- `id: <task-id>`: Required, unique task identifier
+  - Best practice: use `<feature>_<timestamp>` format (e.g., `auth_1732876800`, `api_test_1732876801`)
+  - Ensures uniqueness across runs and makes tasks traceable
+- `workdir: <path>`: Optional, working directory (default: `.`)
+  - Best practice: use absolute paths (e.g., `/home/user/project/backend`)
+  - Avoids ambiguity and ensures consistent behavior across environments
+  - Must be specified inside each task block; do not pass `workdir` as a CLI argument to `--parallel`
+  - Each task can set its own `workdir` when different directories are needed
+- `dependencies: <id1>, <id2>`: Optional, comma-separated task IDs
+- `session_id: <uuid>`: Optional, resume a previous session
+- `---CONTENT---`: Separates metadata from task content
+- Task content: Any text, code, special characters (no escaping needed)
+
+**Dependencies Best Practices**
+
+- Avoid multiple invocations: Place "analyze then implement" in a single `codex-wrapper --parallel` call, chaining them via `dependencies`, rather than running analysis first and then launching implementation separately.
+- Naming convention: Use `<action>_<timestamp>` format (e.g., `analyze_1732876800`, `implement_1732876801`), where action names map to features/stages and timestamps ensure uniqueness and sortability.
+- Dependency chain design: Keep chains short; only add dependencies for tasks that truly require ordering, let others run in parallel, avoiding over-serialization that reduces throughput.
+
+**Resume Failed Tasks**:
+```bash
+# Use session_id from previous output to resume
+codex-wrapper --parallel <<'EOF'
+---TASK---
+id: T2
+session_id: 019xxx-previous-session-id
+---CONTENT---
+fix the previous error and retry
+EOF
+```
+
+**Output**: Human-readable text format
+```
+=== Parallel Execution Summary ===
+Total: 3 | Success: 2 | Failed: 1
+
+--- Task: T1 ---
+Status: SUCCESS
+Session: 019xxx
+
+Task output message...
+
+--- Task: T2 ---
+Status: FAILED (exit code 1)
+Error: some error message
+```
+
+**Features**:
+- Automatic topological sorting based on dependencies
+- Unlimited concurrency for independent tasks
+- Error isolation (failed tasks don't stop others)
+- Dependency blocking (dependent tasks skip if parent fails)
 
 ## Notes
 
