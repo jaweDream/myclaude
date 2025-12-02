@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // Logger writes log messages asynchronously to a temp file.
@@ -14,12 +17,15 @@ import (
 type Logger struct {
 	path      string
 	file      *os.File
+	writer    *bufio.Writer
 	ch        chan logEntry
+	flushReq  chan struct{}
 	done      chan struct{}
 	closed    atomic.Bool
 	closeOnce sync.Once
 	workerWG  sync.WaitGroup
 	pendingWG sync.WaitGroup
+	flushMu   sync.Mutex
 }
 
 type logEntry struct {
@@ -30,7 +36,19 @@ type logEntry struct {
 // NewLogger creates the async logger and starts the worker goroutine.
 // The log file is created under os.TempDir() using the required naming scheme.
 func NewLogger() (*Logger, error) {
-	path := filepath.Join(os.TempDir(), fmt.Sprintf("codex-wrapper-%d.log", os.Getpid()))
+	return NewLoggerWithSuffix("")
+}
+
+// NewLoggerWithSuffix creates a logger with an optional suffix in the filename.
+// Useful for tests that need isolated log files within the same process.
+func NewLoggerWithSuffix(suffix string) (*Logger, error) {
+	filename := fmt.Sprintf("codex-wrapper-%d", os.Getpid())
+	if suffix != "" {
+		filename += "-" + suffix
+	}
+	filename += ".log"
+
+	path := filepath.Join(os.TempDir(), filename)
 
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
@@ -38,10 +56,12 @@ func NewLogger() (*Logger, error) {
 	}
 
 	l := &Logger{
-		path: path,
-		file: f,
-		ch:   make(chan logEntry, 100),
-		done: make(chan struct{}),
+		path:     path,
+		file:     f,
+		writer:   bufio.NewWriterSize(f, 4096),
+		ch:       make(chan logEntry, 1000),
+		flushReq: make(chan struct{}, 1),
+		done:     make(chan struct{}),
 	}
 
 	l.workerWG.Add(1)
@@ -73,6 +93,7 @@ func (l *Logger) Error(msg string) { l.log("ERROR", msg) }
 // Close stops the worker and syncs the log file.
 // The log file is NOT removed, allowing inspection after program exit.
 // It is safe to call multiple times.
+// Returns after a 5-second timeout if worker doesn't stop gracefully.
 func (l *Logger) Close() error {
 	if l == nil {
 		return nil
@@ -85,9 +106,26 @@ func (l *Logger) Close() error {
 		close(l.done)
 		close(l.ch)
 
-		l.workerWG.Wait()
+		// Wait for worker with timeout
+		workerDone := make(chan struct{})
+		go func() {
+			l.workerWG.Wait()
+			close(workerDone)
+		}()
 
-		if err := l.file.Sync(); err != nil {
+		select {
+		case <-workerDone:
+			// Worker stopped gracefully
+		case <-time.After(5 * time.Second):
+			// Worker timeout - proceed with cleanup anyway
+			closeErr = fmt.Errorf("logger worker timeout during close")
+		}
+
+		if err := l.writer.Flush(); err != nil && closeErr == nil {
+			closeErr = err
+		}
+
+		if err := l.file.Sync(); err != nil && closeErr == nil {
 			closeErr = err
 		}
 
@@ -102,12 +140,61 @@ func (l *Logger) Close() error {
 	return closeErr
 }
 
+// RemoveLogFile removes the log file. Should only be called after Close().
+func (l *Logger) RemoveLogFile() error {
+	if l == nil {
+		return nil
+	}
+	return os.Remove(l.path)
+}
+
 // Flush waits for all pending log entries to be written. Primarily for tests.
+// Returns after a 5-second timeout to prevent indefinite blocking.
 func (l *Logger) Flush() {
 	if l == nil {
 		return
 	}
-	l.pendingWG.Wait()
+
+	// Wait for pending entries with timeout
+	done := make(chan struct{})
+	go func() {
+		l.pendingWG.Wait()
+		close(done)
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	select {
+	case <-done:
+		// All pending entries processed
+	case <-ctx.Done():
+		// Timeout - return without full flush
+		return
+	}
+
+	// Trigger writer flush
+	select {
+	case l.flushReq <- struct{}{}:
+		// Wait for flush to complete (with mutex)
+		flushDone := make(chan struct{})
+		go func() {
+			l.flushMu.Lock()
+			l.flushMu.Unlock()
+			close(flushDone)
+		}()
+
+		select {
+		case <-flushDone:
+			// Flush completed
+		case <-time.After(1 * time.Second):
+			// Flush timeout
+		}
+	case <-l.done:
+		// Logger is closing
+	case <-time.After(1 * time.Second):
+		// Timeout sending flush request
+	}
 }
 
 func (l *Logger) log(level, msg string) {
@@ -122,18 +209,44 @@ func (l *Logger) log(level, msg string) {
 	l.pendingWG.Add(1)
 
 	select {
+	case l.ch <- entry:
 	case <-l.done:
 		l.pendingWG.Done()
 		return
-	case l.ch <- entry:
+	default:
+		// Channel is full; drop the entry to avoid blocking callers.
+		l.pendingWG.Done()
+		return
 	}
 }
 
 func (l *Logger) run() {
 	defer l.workerWG.Done()
 
-	for entry := range l.ch {
-		fmt.Fprintf(l.file, "%s: %s\n", entry.level, entry.msg)
-		l.pendingWG.Done()
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case entry, ok := <-l.ch:
+			if !ok {
+				// Channel closed, final flush
+				l.writer.Flush()
+				return
+			}
+			timestamp := time.Now().Format("2006-01-02 15:04:05.000")
+			pid := os.Getpid()
+			fmt.Fprintf(l.writer, "[%s] [PID:%d] %s: %s\n", timestamp, pid, entry.level, entry.msg)
+			l.pendingWG.Done()
+
+		case <-ticker.C:
+			l.writer.Flush()
+
+		case <-l.flushReq:
+			// Explicit flush request
+			l.flushMu.Lock()
+			l.writer.Flush()
+			l.flushMu.Unlock()
+		}
 	}
 }

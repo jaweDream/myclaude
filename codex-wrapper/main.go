@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	version            = "1.0.0"
+	version            = "4.8.2"
 	defaultWorkdir     = "."
 	defaultTimeout     = 7200 // seconds
 	forceKillDelay     = 5    // seconds
@@ -359,7 +359,7 @@ func main() {
 }
 
 // run is the main logic, returns exit code for testability
-func run() int {
+func run() (exitCode int) {
 	logger, err := NewLogger()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ERROR: failed to initialize logger: %v\n", err)
@@ -368,11 +368,19 @@ func run() int {
 	setLogger(logger)
 
 	defer func() {
-		if logger := activeLogger(); logger != nil {
+		logger := activeLogger()
+		if logger != nil {
 			logger.Flush()
 		}
 		if err := closeLogger(); err != nil {
 			fmt.Fprintf(os.Stderr, "ERROR: failed to close logger: %v\n", err)
+		}
+		if exitCode == 0 && logger != nil {
+			if err := logger.RemoveLogFile(); err != nil && !os.IsNotExist(err) {
+				fmt.Fprintf(os.Stderr, "ERROR: failed to remove logger file: %v\n", err)
+			}
+		} else if exitCode != 0 && logger != nil {
+			fmt.Fprintf(os.Stderr, "Log file retained at: %s\n", logger.Path())
 		}
 	}()
 	defer runCleanupHook()
@@ -417,7 +425,7 @@ func run() int {
 			results := executeConcurrent(layers, timeoutSec)
 			fmt.Println(generateFinalOutput(results))
 
-			exitCode := 0
+			exitCode = 0
 			for _, res := range results {
 				if res.ExitCode != 0 {
 					exitCode = res.ExitCode
@@ -653,9 +661,39 @@ func runCodexTaskWithContext(parentCtx context.Context, taskSpec TaskSpec, custo
 		codexArgs = buildCodexArgsFn(cfg, targetArg)
 	}
 
-	logInfoFn := logInfo
-	logWarnFn := logWarn
-	logErrorFn := logError
+	prefixMsg := func(msg string) string {
+		if taskSpec.ID == "" {
+			return msg
+		}
+		return fmt.Sprintf("[Task: %s] %s", taskSpec.ID, msg)
+	}
+
+	var logInfoFn func(string)
+	var logWarnFn func(string)
+	var logErrorFn func(string)
+
+	if silent {
+		// Silent mode: only persist to file when available; avoid stderr noise.
+		logInfoFn = func(msg string) {
+			if logger := activeLogger(); logger != nil {
+				logger.Info(prefixMsg(msg))
+			}
+		}
+		logWarnFn = func(msg string) {
+			if logger := activeLogger(); logger != nil {
+				logger.Warn(prefixMsg(msg))
+			}
+		}
+		logErrorFn = func(msg string) {
+			if logger := activeLogger(); logger != nil {
+				logger.Error(prefixMsg(msg))
+			}
+		}
+	} else {
+		logInfoFn = func(msg string) { logInfo(prefixMsg(msg)) }
+		logWarnFn = func(msg string) { logWarn(prefixMsg(msg)) }
+		logErrorFn = func(msg string) { logError(prefixMsg(msg)) }
+	}
 
 	stderrBuf := &tailBuffer{limit: stderrCaptureLimit}
 
@@ -749,7 +787,10 @@ func runCodexTaskWithContext(parentCtx context.Context, taskSpec TaskSpec, custo
 		return result
 	}
 
-	logInfoFn(fmt.Sprintf("Process started with PID: %d", cmd.Process.Pid))
+	logInfoFn(fmt.Sprintf("Starting codex with PID: %d", cmd.Process.Pid))
+	if logger := activeLogger(); logger != nil {
+		logInfoFn(fmt.Sprintf("Log capturing to: %s", logger.Path()))
+	}
 
 	if useStdin && stdinPipe != nil {
 		logInfoFn(fmt.Sprintf("Writing %d chars to stdin...", len(taskSpec.Task)))
@@ -765,7 +806,7 @@ func runCodexTaskWithContext(parentCtx context.Context, taskSpec TaskSpec, custo
 
 	parseCh := make(chan parseResult, 1)
 	go func() {
-		msg, tid := parseJSONStreamWithWarn(stdoutReader, logWarnFn)
+		msg, tid := parseJSONStreamWithLog(stdoutReader, logWarnFn, logInfoFn)
 		parseCh <- parseResult{message: msg, threadID: tid}
 	}()
 
@@ -913,15 +954,22 @@ func terminateProcess(cmd *exec.Cmd) *time.Timer {
 }
 
 func parseJSONStream(r io.Reader) (message, threadID string) {
-	return parseJSONStreamWithWarn(r, logWarn)
+	return parseJSONStreamWithLog(r, logWarn, logInfo)
 }
 
 func parseJSONStreamWithWarn(r io.Reader, warnFn func(string)) (message, threadID string) {
+	return parseJSONStreamWithLog(r, warnFn, logInfo)
+}
+
+func parseJSONStreamWithLog(r io.Reader, warnFn func(string), infoFn func(string)) (message, threadID string) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
 
 	if warnFn == nil {
 		warnFn = func(string) {}
+	}
+	if infoFn == nil {
+		infoFn = func(string) {}
 	}
 
 	totalEvents := 0
@@ -947,15 +995,15 @@ func parseJSONStreamWithWarn(r io.Reader, warnFn func(string)) (message, threadI
 			details = append(details, fmt.Sprintf("item_type=%s", event.Item.Type))
 		}
 		if len(details) > 0 {
-			logInfo(fmt.Sprintf("Parsed event #%d type=%s (%s)", totalEvents, event.Type, strings.Join(details, ", ")))
+			infoFn(fmt.Sprintf("Parsed event #%d type=%s (%s)", totalEvents, event.Type, strings.Join(details, ", ")))
 		} else {
-			logInfo(fmt.Sprintf("Parsed event #%d type=%s", totalEvents, event.Type))
+			infoFn(fmt.Sprintf("Parsed event #%d type=%s", totalEvents, event.Type))
 		}
 
 		switch event.Type {
 		case "thread.started":
 			threadID = event.ThreadID
-			logInfo(fmt.Sprintf("thread.started event thread_id=%s", threadID))
+			infoFn(fmt.Sprintf("thread.started event thread_id=%s", threadID))
 		case "item.completed":
 			var itemType string
 			var normalized string
@@ -963,7 +1011,7 @@ func parseJSONStreamWithWarn(r io.Reader, warnFn func(string)) (message, threadI
 				itemType = event.Item.Type
 				normalized = normalizeText(event.Item.Text)
 			}
-			logInfo(fmt.Sprintf("item.completed event item_type=%s message_len=%d", itemType, len(normalized)))
+			infoFn(fmt.Sprintf("item.completed event item_type=%s message_len=%d", itemType, len(normalized)))
 			if event.Item != nil && event.Item.Type == "agent_message" && normalized != "" {
 				message = normalized
 			}
@@ -974,7 +1022,7 @@ func parseJSONStreamWithWarn(r io.Reader, warnFn func(string)) (message, threadI
 		warnFn("Read stdout error: " + err.Error())
 	}
 
-	logInfo(fmt.Sprintf("parseJSONStream completed: events=%d, message_len=%d, thread_id_found=%t", totalEvents, len(message), threadID != ""))
+	infoFn(fmt.Sprintf("parseJSONStream completed: events=%d, message_len=%d, thread_id_found=%t", totalEvents, len(message), threadID != ""))
 	return message, threadID
 }
 
@@ -1162,27 +1210,27 @@ func farewell(name string) string {
 }
 
 func logInfo(msg string) {
+	fmt.Fprintf(os.Stderr, "INFO: %s\n", msg)
+
 	if logger := activeLogger(); logger != nil {
 		logger.Info(msg)
-		return
 	}
-	fmt.Fprintf(os.Stderr, "INFO: %s\n", msg)
 }
 
 func logWarn(msg string) {
+	fmt.Fprintf(os.Stderr, "WARN: %s\n", msg)
+
 	if logger := activeLogger(); logger != nil {
 		logger.Warn(msg)
-		return
 	}
-	fmt.Fprintf(os.Stderr, "WARN: %s\n", msg)
 }
 
 func logError(msg string) {
+	fmt.Fprintf(os.Stderr, "ERROR: %s\n", msg)
+
 	if logger := activeLogger(); logger != nil {
 		logger.Error(msg)
-		return
 	}
-	fmt.Fprintf(os.Stderr, "ERROR: %s\n", msg)
 }
 
 func runCleanupHook() {

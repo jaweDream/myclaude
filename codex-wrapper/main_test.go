@@ -1217,7 +1217,7 @@ func TestRun_PipedTaskReadError(t *testing.T) {
 	if exitCode != 1 {
 		t.Fatalf("exit=%d, want 1", exitCode)
 	}
-	if !strings.Contains(logOutput, "Failed to read piped stdin: read stdin: pipe failure") {
+	if !strings.Contains(logOutput, "ERROR: Failed to read piped stdin: read stdin: pipe failure") {
 		t.Fatalf("log missing piped read error, got %q", logOutput)
 	}
 	if _, err := os.Stat(logPath); os.IsNotExist(err) {
@@ -1275,10 +1275,9 @@ func TestRun_LoggerLifecycle(t *testing.T) {
 	if !fileExisted {
 		t.Fatalf("log file was not present during run")
 	}
-	if _, err := os.Stat(logPath); os.IsNotExist(err) {
-		t.Fatalf("log file should exist after run")
+	if _, err := os.Stat(logPath); !os.IsNotExist(err) {
+		t.Fatalf("log file should be removed on success, but it exists")
 	}
-	defer os.Remove(logPath)
 }
 
 func TestRun_LoggerRemovedOnSignal(t *testing.T) {
