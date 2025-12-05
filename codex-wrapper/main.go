@@ -444,12 +444,6 @@ func run() (exitCode int) {
 
 	logInfo("Script started")
 
-	// Print startup information to stderr
-	fmt.Fprintf(os.Stderr, "[codex-wrapper]\n")
-	fmt.Fprintf(os.Stderr, "  Command: %s\n", strings.Join(os.Args, " "))
-	fmt.Fprintf(os.Stderr, "  PID: %d\n", os.Getpid())
-	fmt.Fprintf(os.Stderr, "  Log: %s\n", logger.Path())
-
 	cfg, err := parseArgs()
 	if err != nil {
 		logError(err.Error())
@@ -492,6 +486,18 @@ func run() (exitCode int) {
 	}
 
 	useStdin := cfg.ExplicitStdin || shouldUseStdin(taskText, piped)
+
+	targetArg := taskText
+	if useStdin {
+		targetArg = "-"
+	}
+	codexArgs := buildCodexArgsFn(cfg, targetArg)
+
+	// Print startup information to stderr
+	fmt.Fprintf(os.Stderr, "[codex-wrapper]\n")
+	fmt.Fprintf(os.Stderr, "  Command: %s %s\n", codexCommand, strings.Join(codexArgs, " "))
+	fmt.Fprintf(os.Stderr, "  PID: %d\n", os.Getpid())
+	fmt.Fprintf(os.Stderr, "  Log: %s\n", logger.Path())
 
 	if useStdin {
 		var reasons []string
