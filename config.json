@@ -1,0 +1,89 @@
+{
+  "version": "1.0",
+  "install_dir": "~/.claude",
+  "log_file": "install.log",
+  "modules": {
+    "dev": {
+      "enabled": true,
+      "description": "Core dev workflow with Codex integration",
+      "operations": [
+        {
+          "type": "merge_dir",
+          "source": "dev-workflow",
+          "description": "Merge commands/ and agents/ into install dir"
+        },
+        {
+          "type": "copy_file",
+          "source": "memorys/CLAUDE.md",
+          "target": "CLAUDE.md",
+          "description": "Copy core role and guidelines"
+        },
+        {
+          "type": "copy_file",
+          "source": "skills/codex/SKILL.md",
+          "target": "skills/codex/SKILL.md",
+          "description": "Install codex skill"
+        },
+        {
+          "type": "run_command",
+          "command": "bash install.sh",
+          "description": "Install codex-wrapper binary",
+          "env": {
+            "INSTALL_DIR": "${install_dir}"
+          }
+        }
+      ]
+    },
+    "bmad": {
+      "enabled": false,
+      "description": "BMAD agile workflow with multi-agent orchestration",
+      "operations": [
+        {
+          "type": "merge_dir",
+          "source": "bmad-agile-workflow",
+          "description": "Merge BMAD commands and agents"
+        },
+        {
+          "type": "copy_file",
+          "source": "docs/BMAD-WORKFLOW.md",
+          "target": "docs/BMAD-WORKFLOW.md",
+          "description": "Copy BMAD workflow documentation"
+        }
+      ]
+    },
+    "requirements": {
+      "enabled": false,
+      "description": "Requirements-driven development workflow",
+      "operations": [
+        {
+          "type": "merge_dir",
+          "source": "requirements-driven-workflow",
+          "description": "Merge requirements workflow commands and agents"
+        },
+        {
+          "type": "copy_file",
+          "source": "docs/REQUIREMENTS-WORKFLOW.md",
+          "target": "docs/REQUIREMENTS-WORKFLOW.md",
+          "description": "Copy requirements workflow documentation"
+        }
+      ]
+    },
+    "essentials": {
+      "enabled": true,
+      "description": "Core development commands and utilities",
+      "operations": [
+        {
+          "type": "merge_dir",
+          "source": "development-essentials",
+          "description": "Merge essential development commands"
+        },
+        {
+          "type": "copy_file",
+          "source": "docs/DEVELOPMENT-COMMANDS.md",
+          "target": "docs/DEVELOPMENT-COMMANDS.md",
+          "description": "Copy development commands documentation"
+        }
+      ]
+    }
+  }
+}
