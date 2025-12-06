@@ -101,7 +101,7 @@ jobs:
         run: |
           mkdir -p release
           find artifacts -type f -name "codex-wrapper-*" -exec mv {} release/ \;
-          cp install.sh install.ps1 install.bat release/
+          cp install.sh install.bat release/
           ls -la release/
 
       - name: Create Release
