@@ -238,6 +238,33 @@ python3 install.py --module dev
 bash install.sh
 ```
 
+#### Windows
+
+Windows installs place `codex-wrapper.exe` in `%USERPROFILE%\bin`.
+
+```powershell
+# PowerShell (recommended)
+powershell -ExecutionPolicy Bypass -File install.ps1
+
+# Batch (cmd)
+install.bat
+```
+
+**Add to PATH** (if installer doesn't detect it):
+
+```powershell
+# PowerShell - persistent for current user
+[Environment]::SetEnvironmentVariable('PATH', "$HOME\bin;" + [Environment]::GetEnvironmentVariable('PATH','User'), 'User')
+
+# PowerShell - current session only
+$Env:PATH = "$HOME\bin;$Env:PATH"
+```
+
+```batch
+REM cmd.exe - persistent for current user
+setx PATH "%USERPROFILE%\bin;%PATH%"
+```
+
 ---
 
 ## Workflow Selection Guide
