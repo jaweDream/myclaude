@@ -23,7 +23,7 @@ This system leverages a **dual-agent architecture**:
 - Codex excels at focused code generation and execution
 - Together they provide better results than either alone
 
-## Quick Start
+## Quick Start(Please execute in Powershell on Windows)
 
 ```bash
 git clone https://github.com/cexll/myclaude.git

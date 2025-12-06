@@ -20,7 +20,7 @@
 - Codex 擅长专注的代码生成和执行
 - 两者结合效果优于单独使用
 
-## 快速开始
+## 快速开始（windows上请在Powershell中执行）
 
 ```bash
 git clone https://github.com/cexll/myclaude.git

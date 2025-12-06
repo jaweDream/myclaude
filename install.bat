@@ -46,15 +46,64 @@ echo.
 echo codex-wrapper installed successfully at:
 echo   %DEST%
 
-set "PATH_CHECK=;%PATH%;"
-echo !PATH_CHECK! | findstr /I /C:";%DEST_DIR%;" >nul
-if errorlevel 1 (
-    echo.
-    echo %DEST_DIR% is not in your PATH.
-    echo Add it for the current user with:
-    echo   setx PATH "%%USERPROFILE%%\bin;%%PATH%%"
-    echo Then restart your terminal to use codex-wrapper globally.
+rem Automatically ensure %USERPROFILE%\bin is in the USER (HKCU) PATH
+rem 1) Read current user PATH from registry (REG_SZ or REG_EXPAND_SZ)
+set "USER_PATH_RAW="
+set "USER_PATH_TYPE="
+for /f "tokens=1,2,*" %%A in ('reg query "HKCU\Environment" /v Path 2^>nul ^| findstr /I /R "^ *Path  *REG_"') do (
+    set "USER_PATH_TYPE=%%B"
+    set "USER_PATH_RAW=%%C"
 )
+rem Trim leading spaces from USER_PATH_RAW
+for /f "tokens=* delims= " %%D in ("!USER_PATH_RAW!") do set "USER_PATH_RAW=%%D"
+
+rem Normalize DEST_DIR by removing a trailing backslash if present
+if "!DEST_DIR:~-1!"=="\" set "DEST_DIR=!DEST_DIR:~0,-1!"
+
+rem Build search tokens (expanded and literal)
+set "PCT=%%"
+set "SEARCH_EXP=;!DEST_DIR!;"
+set "SEARCH_EXP2=;!DEST_DIR!\;"
+set "SEARCH_LIT=;!PCT!USERPROFILE!PCT!\bin;"
+set "SEARCH_LIT2=;!PCT!USERPROFILE!PCT!\bin\;"
+
+rem Prepare user PATH variants for containment tests
+set "CHECK_RAW=;!USER_PATH_RAW!;"
+set "USER_PATH_EXP=!USER_PATH_RAW!"
+if defined USER_PATH_EXP call set "USER_PATH_EXP=%%USER_PATH_EXP%%"
+set "CHECK_EXP=;!USER_PATH_EXP!;"
+
+rem Check if already present in user PATH (literal or expanded, with/without trailing backslash)
+set "ALREADY_IN_USERPATH=0"
+echo !CHECK_RAW! | findstr /I /C:"!SEARCH_LIT!" /C:"!SEARCH_LIT2!" >nul && set "ALREADY_IN_USERPATH=1"
+if "!ALREADY_IN_USERPATH!"=="0" (
+    echo !CHECK_EXP! | findstr /I /C:"!SEARCH_EXP!" /C:"!SEARCH_EXP2!" >nul && set "ALREADY_IN_USERPATH=1"
+)
+
+if "!ALREADY_IN_USERPATH!"=="1" (
+    echo User PATH already includes %%USERPROFILE%%\bin.
+) else (
+    rem Not present: append to user PATH using setx without duplicating system PATH
+    if defined USER_PATH_RAW (
+        set "USER_PATH_NEW=!USER_PATH_RAW!"
+        if not "!USER_PATH_NEW:~-1!"==";" set "USER_PATH_NEW=!USER_PATH_NEW!;"
+        set "USER_PATH_NEW=!USER_PATH_NEW!!PCT!USERPROFILE!PCT!\bin"
+    ) else (
+        set "USER_PATH_NEW=!PCT!USERPROFILE!PCT!\bin"
+    )
+    rem Persist update to HKCU\Environment\Path (user scope)
+    setx PATH "!USER_PATH_NEW!" >nul
+    if errorlevel 1 (
+        echo WARNING: Failed to append %%USERPROFILE%%\bin to your user PATH.
+    ) else (
+        echo Added %%USERPROFILE%%\bin to your user PATH.
+    )
+)
+
+rem Update current session PATH so codex-wrapper is immediately available
+set "CURPATH=;%PATH%;"
+echo !CURPATH! | findstr /I /C:"!SEARCH_EXP!" /C:"!SEARCH_EXP2!" /C:"!SEARCH_LIT!" /C:"!SEARCH_LIT2!" >nul
+if errorlevel 1 set "PATH=!DEST_DIR!;!PATH!"
 
 goto :cleanup
 
