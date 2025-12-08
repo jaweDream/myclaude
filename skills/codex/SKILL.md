@@ -15,34 +15,62 @@ Execute Codex CLI commands and parse structured JSON responses. Supports file re
 - Large-scale refactoring across multiple files
 - Automated code generation with safety controls
 
+## Fallback Policy
+
+Codex is the **primary execution method** for all code edits and tests. Direct execution is only permitted when:
+
+1. Codex is unavailable (service down, network issues)
+2. Codex fails **twice consecutively** on the same task
+
+When falling back to direct execution:
+- Log `CODEX_FALLBACK` with the reason
+- Retry Codex on the next task (don't permanently switch)
+- Document the fallback in the final summary
+
 ## Usage
 
-**Mandatory**: Run every automated invocation through the Bash tool in the foreground with the command below, keeping the `timeout` parameter fixed at `7200000` milliseconds (do not change it or use any other entry point).
+**Mandatory**: Run every automated invocation through the Bash tool in the foreground with **HEREDOC syntax** to avoid shell quoting issues, keeping the `timeout` parameter fixed at `7200000` milliseconds (do not change it or use any other entry point).
+
 ```bash
-uv run ~/.claude/skills/codex/scripts/codex.py "<task>" [working_dir]
+codex-wrapper - [working_dir] <<'EOF'
+<task content here>
+EOF
 ```
 
-**Foreground only (no background/BashOutput)**: Never set `background: true`, never accept Claude's “Running in the background” mode, and avoid `BashOutput` streaming loops. Keep a single foreground Bash call per Codex task; if work might be long, split it into smaller foreground runs instead of offloading to background execution.
+**Why HEREDOC?** Tasks often contain code blocks, nested quotes, shell metacharacters (`$`, `` ` ``, `\`), and multiline text. HEREDOC (Here Document) syntax passes these safely without shell interpretation, eliminating quote-escaping nightmares.
 
-**Optional methods** (direct execution or via Python):
+**Foreground only (no background/BashOutput)**: Never set `background: true`, never accept Claude's "Running in the background" mode, and avoid `BashOutput` streaming loops. Keep a single foreground Bash call per Codex task; if work might be long, split it into smaller foreground runs instead of offloading to background execution.
+
+**Simple tasks** (backward compatibility):
+For simple single-line tasks without special characters, you can still use direct quoting:
 ```bash
-~/.claude/skills/codex/scripts/codex.py "<task>" [working_dir]
-# or
-python3 ~/.claude/skills/codex/scripts/codex.py "<task>" [working_dir]
+codex-wrapper "simple task here" [working_dir]
 ```
 
-Resume a session:
+**Resume a session with HEREDOC:**
 ```bash
-uv run ~/.claude/skills/codex/scripts/codex.py resume <session_id> "<task>" [working_dir]
+codex-wrapper resume <session_id> - [working_dir] <<'EOF'
+<task content>
+EOF
 ```
+
+**Cross-platform notes:**
+- **Bash/Zsh**: Use `<<'EOF'` (single quotes prevent variable expansion)
+- **PowerShell 5.1+**: Use `@'` and `'@` (here-string syntax)
+  ```powershell
+  codex-wrapper - @'
+  task content
+  '@
+  ```
 
 ## Environment Variables
+
 - **CODEX_TIMEOUT**: Override timeout in milliseconds (default: 7200000 = 2 hours)
   - Example: `export CODEX_TIMEOUT=3600000` for 1 hour
 
 ## Timeout Control
 
-- **Built-in**: Script enforces 2-hour timeout by default
+- **Built-in**: Binary enforces 2-hour timeout by default
 - **Override**: Set `CODEX_TIMEOUT` environment variable (in milliseconds, e.g., `CODEX_TIMEOUT=3600000` for 1 hour)
 - **Behavior**: On timeout, sends SIGTERM, then SIGKILL after 5s if process doesn't exit
 - **Exit code**: Returns 124 on timeout (consistent with GNU timeout)
@@ -72,85 +100,234 @@ Return only the final agent message and session ID—do not paste raw `BashOutpu
 
 ### Invocation Pattern
 
-All automated executions may only invoke `uv run ~/.claude/skills/codex/scripts/codex.py "<task>" ...` through the Bash tool in the foreground, and the `timeout` must remain fixed at `7200000` (non-negotiable):
+All automated executions must use HEREDOC syntax through the Bash tool in the foreground, with `timeout` fixed at `7200000` (non-negotiable):
+
 ```
 Bash tool parameters:
-- command: uv run ~/.claude/skills/codex/scripts/codex.py "<task>" [working_dir]
+- command: codex-wrapper - [working_dir] <<'EOF'
+  <task content>
+  EOF
 - timeout: 7200000
 - description: <brief description of the task>
 ```
+
 Run every call in the foreground—never append `&` to background it—so logs and errors stay visible for timely interruption or diagnosis.
 
-Alternatives:
-```
-# Direct execution (simplest)
-- command: ~/.claude/skills/codex/scripts/codex.py "<task>" [working_dir]
-
-# Using python3
-- command: python3 ~/.claude/skills/codex/scripts/codex.py "<task>" [working_dir]
-```
+**Important:** Use HEREDOC (`<<'EOF'`) for all but the simplest tasks. This prevents shell interpretation of quotes, variables, and special characters.
 
 ### Examples
 
 **Basic code analysis:**
 ```bash
-# Recommended: via uv run (auto-manages Python environment)
-uv run ~/.claude/skills/codex/scripts/codex.py "explain @src/main.ts"
+# Recommended: with HEREDOC (handles any special characters)
+codex-wrapper - <<'EOF'
+explain @src/main.ts
+EOF
 # timeout: 7200000
 
-# Alternative: direct execution
-~/.claude/skills/codex/scripts/codex.py "explain @src/main.ts"
+# Alternative: simple direct quoting (if task is simple)
+codex-wrapper "explain @src/main.ts"
 ```
 
-**Refactoring with custom model (via environment variable):**
+**Refactoring with multiline instructions:**
 ```bash
-# Set model via environment variable
-uv run ~/.claude/skills/codex/scripts/codex.py "refactor @src/utils for performance"
+codex-wrapper - <<'EOF'
+refactor @src/utils for performance:
+- Extract duplicate code into helpers
+- Use memoization for expensive calculations
+- Add inline comments for non-obvious logic
+EOF
 # timeout: 7200000
 ```
 
 **Multi-file analysis:**
 ```bash
-uv run ~/.claude/skills/codex/scripts/codex.py "analyze @. and find security issues" "/path/to/project"
+codex-wrapper - "/path/to/project" <<'EOF'
+analyze @. and find security issues:
+1. Check for SQL injection vulnerabilities
+2. Identify XSS risks in templates
+3. Review authentication/authorization logic
+4. Flag hardcoded credentials or secrets
+EOF
 # timeout: 7200000
 ```
 
 **Resume previous session:**
 ```bash
 # First session
-uv run ~/.claude/skills/codex/scripts/codex.py "add comments to @utils.js"
+codex-wrapper - <<'EOF'
+add comments to @utils.js explaining the caching logic
+EOF
 # Output includes: SESSION_ID: 019a7247-ac9d-71f3-89e2-a823dbd8fd14
 
-# Continue the conversation
-uv run ~/.claude/skills/codex/scripts/codex.py resume 019a7247-ac9d-71f3-89e2-a823dbd8fd14 "now add type hints"
+# Continue the conversation with more context
+codex-wrapper resume 019a7247-ac9d-71f3-89e2-a823dbd8fd14 - <<'EOF'
+now add TypeScript type hints and handle edge cases where cache is null
+EOF
 # timeout: 7200000
 ```
 
-**Using python3 directly (alternative):**
+**Task with code snippets and special characters:**
 ```bash
-python3 ~/.claude/skills/codex/scripts/codex.py "your task here"
+codex-wrapper - <<'EOF'
+Fix the bug in @app.js where the regex /\d+/ doesn't match "123"
+The current code is:
+  const re = /\d+/;
+  if (re.test(input)) { ... }
+Add proper escaping and handle $variables correctly.
+EOF
 ```
 
-### Large Task Protocol
+### Parallel Execution
 
-- For every large task, first produce a canonical task list that enumerates the Task ID, description, file/directory scope, dependencies, test commands, and the expected Codex Bash invocation.
-- Tasks without dependencies should be executed concurrently via multiple foreground Bash calls (you can keep separate terminal windows) and each run must log start/end times plus any shared resource usage.
-- Reuse context aggressively (such as @spec.md or prior analysis output), and after concurrent execution finishes, reconcile against the task list to report which items completed and which slipped.
+> Important:
+> - `--parallel` only reads task definitions from stdin.
+> - It does not accept extra command-line arguments (no inline `workdir`, `task`, or other params).
+> - Put all task metadata and content in stdin; nothing belongs after `--parallel` on the command line.
 
-| ID | Description | Scope | Dependencies | Tests | Command |
-| --- | --- | --- | --- | --- | --- |
-| T1 | Review @spec.md to extract requirements | docs/, @spec.md | None | None | uv run ~/.claude/skills/codex/scripts/codex.py "analyze requirements @spec.md" |
-| T2 | Implement the module and add test cases | src/module | T1 | npm test -- --runInBand | uv run ~/.claude/skills/codex/scripts/codex.py "implement and test @src/module" |
+**Correct vs Incorrect Usage**
+
+**Correct:**
+```bash
+# Option 1: file redirection
+codex-wrapper --parallel < tasks.txt
+
+# Option 2: heredoc (recommended for multiple tasks)
+codex-wrapper --parallel <<'EOF'
+---TASK---
+id: task1
+workdir: /path/to/dir
+---CONTENT---
+task content
+EOF
+
+# Option 3: pipe
+echo "---TASK---..." | codex-wrapper --parallel
+```
+
+**Incorrect (will trigger shell parsing errors):**
+```bash
+# Bad: no extra args allowed after --parallel
+codex-wrapper --parallel - /path/to/dir <<'EOF'
+...
+EOF
+
+# Bad: --parallel does not take a task argument
+codex-wrapper --parallel "task description"
+
+# Bad: workdir must live inside the task config
+codex-wrapper --parallel /path/to/dir < tasks.txt
+```
+
+For multiple independent or dependent tasks, use `--parallel` mode with delimiter format:
+
+**Typical Workflow (analyze → implement → test, chained in a single parallel call)**:
+```bash
+codex-wrapper --parallel <<'EOF'
+---TASK---
+id: analyze_1732876800
+workdir: /home/user/project
+---CONTENT---
+analyze @spec.md and summarize API and UI requirements
+---TASK---
+id: implement_1732876801
+workdir: /home/user/project
+dependencies: analyze_1732876800
+---CONTENT---
+implement features from analyze_1732876800 summary in backend @services and frontend @ui
+---TASK---
+id: test_1732876802
+workdir: /home/user/project
+dependencies: implement_1732876801
+---CONTENT---
+add and run regression tests covering the new endpoints and UI flows
+EOF
+```
+A single `codex-wrapper --parallel` call schedules all three stages concurrently, using `dependencies` to enforce sequential ordering without multiple invocations.
+
+```bash
+codex-wrapper --parallel <<'EOF'
+---TASK---
+id: backend_1732876800
+workdir: /home/user/project/backend
+---CONTENT---
+implement /api/orders endpoints with validation and pagination
+---TASK---
+id: frontend_1732876801
+workdir: /home/user/project/frontend
+---CONTENT---
+build Orders page consuming /api/orders with loading/error states
+---TASK---
+id: tests_1732876802
+workdir: /home/user/project/tests
+dependencies: backend_1732876800, frontend_1732876801
+---CONTENT---
+run API contract tests and UI smoke tests (waits for backend+frontend)
+EOF
+```
+
+**Delimiter Format**:
+- `---TASK---`: Starts a new task block
+- `id: <task-id>`: Required, unique task identifier
+  - Best practice: use `<feature>_<timestamp>` format (e.g., `auth_1732876800`, `api_test_1732876801`)
+  - Ensures uniqueness across runs and makes tasks traceable
+- `workdir: <path>`: Optional, working directory (default: `.`)
+  - Best practice: use absolute paths (e.g., `/home/user/project/backend`)
+  - Avoids ambiguity and ensures consistent behavior across environments
+  - Must be specified inside each task block; do not pass `workdir` as a CLI argument to `--parallel`
+  - Each task can set its own `workdir` when different directories are needed
+- `dependencies: <id1>, <id2>`: Optional, comma-separated task IDs
+- `session_id: <uuid>`: Optional, resume a previous session
+- `---CONTENT---`: Separates metadata from task content
+- Task content: Any text, code, special characters (no escaping needed)
+
+**Dependencies Best Practices**
+
+- Avoid multiple invocations: Place "analyze then implement" in a single `codex-wrapper --parallel` call, chaining them via `dependencies`, rather than running analysis first and then launching implementation separately.
+- Naming convention: Use `<action>_<timestamp>` format (e.g., `analyze_1732876800`, `implement_1732876801`), where action names map to features/stages and timestamps ensure uniqueness and sortability.
+- Dependency chain design: Keep chains short; only add dependencies for tasks that truly require ordering, let others run in parallel, avoiding over-serialization that reduces throughput.
+
+**Resume Failed Tasks**:
+```bash
+# Use session_id from previous output to resume
+codex-wrapper --parallel <<'EOF'
+---TASK---
+id: T2
+session_id: 019xxx-previous-session-id
+---CONTENT---
+fix the previous error and retry
+EOF
+```
+
+**Output**: Human-readable text format
+```
+=== Parallel Execution Summary ===
+Total: 3 | Success: 2 | Failed: 1
+
+--- Task: T1 ---
+Status: SUCCESS
+Session: 019xxx
+
+Task output message...
+
+--- Task: T2 ---
+Status: FAILED (exit code 1)
+Error: some error message
+```
+
+**Features**:
+- Automatic topological sorting based on dependencies
+- Unlimited concurrency for independent tasks
+- Error isolation (failed tasks don't stop others)
+- Dependency blocking (dependent tasks skip if parent fails)
 
 ## Notes
 
-- **Recommended**: Use `uv run` for automatic Python environment management (requires uv installed)
-- **Alternative**: Direct execution `./codex.py` (uses system Python via shebang)
-- Python implementation using standard library (zero dependencies)
-- All automated runs must use the Bash tool with the fixed timeout to provide dual timeout protection and unified logging/exit semantics; any alternative approach is limited to manual foreground execution.
-- Cross-platform compatible (Windows/macOS/Linux)
-- PEP 723 compliant (inline script metadata)
-- Runs with `--dangerously-bypass-approvals-and-sandbox` for automation (new sessions only)
+- **Binary distribution**: Single Go binary, zero dependencies
+- **Installation**: Download from GitHub Releases or use install.sh
+- **Cross-platform compatible**: Linux (amd64/arm64), macOS (amd64/arm64)
+- All automated runs must use the Bash tool with the fixed timeout to provide dual timeout protection and unified logging/exit semantics
+for automation (new sessions only)
 - Uses `--skip-git-repo-check` to work in any directory
 - Streams progress, returns only final agent message
 - Every execution returns a session ID for resuming conversations

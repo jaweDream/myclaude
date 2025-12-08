@@ -7,10 +7,12 @@
 help:
 	@echo "Claude Code Multi-Agent Workflow - Quick Deployment"
 	@echo ""
+	@echo "Recommended installation: python3 install.py --install-dir ~/.claude"
+	@echo ""
 	@echo "Usage: make [target]"
 	@echo ""
 	@echo "Targets:"
-	@echo "  install              - Install all configurations to Claude Code"
+	@echo "  install              - LEGACY: install all configurations (prefer install.py)"
 	@echo "  deploy-bmad          - Deploy BMAD workflow (bmad-pilot)"
 	@echo "  deploy-requirements  - Deploy Requirements workflow (requirements-pilot)"
 	@echo "  deploy-essentials    - Deploy Development Essentials workflow"
@@ -36,6 +38,8 @@ OUTPUT_STYLES_DIR = output-styles
 
 # Install all configurations
 install: deploy-all
+	@echo "⚠️  LEGACY PATH: make install will be removed in future versions."
+	@echo "    Prefer: python3 install.py --install-dir ~/.claude"
 	@echo "✅ Installation complete!"
 
 # Deploy BMAD workflow
