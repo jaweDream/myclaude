@@ -17,7 +17,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
-import jsonschema
+try:
+    import jsonschema
+except ImportError:  # pragma: no cover
+    jsonschema = None
 
 DEFAULT_INSTALL_DIR = "~/.claude"
 
@@ -60,6 +63,11 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
         action="store_true",
         help="Force overwrite existing files",
     )
+    parser.add_argument(
+        "--verbose", "-v",
+        action="store_true",
+        help="Enable verbose output to terminal",
+    )
     return parser.parse_args(argv)
 
 
@@ -81,6 +89,32 @@ def load_config(path: str) -> Dict[str, Any]:
 
     config_path = Path(path).expanduser().resolve()
     config = _load_json(config_path)
+
+    if jsonschema is None:
+        print(
+            "WARNING: python package 'jsonschema' is not installed; "
+            "skipping config validation. To enable validation run:\n"
+            "  python3 -m pip install jsonschema\n",
+            file=sys.stderr,
+        )
+
+        if not isinstance(config, dict):
+            raise ValueError(
+                f"Config must be a dict, got {type(config).__name__}. "
+                "Check your config.json syntax."
+            )
+
+        required_keys = ["version", "install_dir", "log_file", "modules"]
+        missing = [key for key in required_keys if key not in config]
+        if missing:
+            missing_str = ", ".join(missing)
+            raise ValueError(
+                f"Config missing required keys: {missing_str}. "
+                "Install jsonschema for better validation: "
+                "python3 -m pip install jsonschema"
+            )
+
+        return config
 
     schema_candidates = [
         config_path.parent / "config.schema.json",
@@ -124,6 +158,7 @@ def resolve_paths(config: Dict[str, Any], args: argparse.Namespace) -> Dict[str,
         "status_file": install_dir / "installed_modules.json",
         "config_dir": config_dir,
         "force": bool(getattr(args, "force", False)),
+        "verbose": bool(getattr(args, "verbose", False)),
         "applied_paths": [],
         "status_backup": None,
     }
@@ -131,12 +166,13 @@ def resolve_paths(config: Dict[str, Any], args: argparse.Namespace) -> Dict[str,
 
 def list_modules(config: Dict[str, Any]) -> None:
     print("Available Modules:")
-    print(f"{'Name':<15} {'Enabled':<8} Description")
+    print(f"{'Name':<15} {'Default':<8} Description")
     print("-" * 60)
     for name, cfg in config.get("modules", {}).items():
-        enabled = "✓" if cfg.get("enabled", False) else "✗"
+        default = "✓" if cfg.get("enabled", False) else "✗"
         desc = cfg.get("description", "")
-        print(f"{name:<15} {enabled:<8} {desc}")
+        print(f"{name:<15} {default:<8} {desc}")
+    print("\n✓ = installed by default when no --module specified")
 
 
 def select_modules(config: Dict[str, Any], module_arg: Optional[str]) -> Dict[str, Any]:
@@ -183,6 +219,8 @@ def execute_module(name: str, cfg: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[
                 op_copy_file(op, ctx)
             elif op_type == "merge_dir":
                 op_merge_dir(op, ctx)
+            elif op_type == "merge_json":
+                op_merge_json(op, ctx)
             elif op_type == "run_command":
                 op_run_command(op, ctx)
             else:
@@ -279,6 +317,51 @@ def op_copy_file(op: Dict[str, Any], ctx: Dict[str, Any]) -> None:
     write_log({"level": "INFO", "message": f"Copied file {src} -> {dst}"}, ctx)
 
 
+def op_merge_json(op: Dict[str, Any], ctx: Dict[str, Any]) -> None:
+    """Merge JSON from source into target, supporting nested key paths."""
+    src = _source_path(op, ctx)
+    dst = _target_path(op, ctx)
+    merge_key = op.get("merge_key")
+
+    if not src.exists():
+        raise FileNotFoundError(f"Source JSON not found: {src}")
+
+    src_data = _load_json(src)
+
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if dst.exists():
+        dst_data = _load_json(dst)
+    else:
+        dst_data = {}
+        _record_created(dst, ctx)
+
+    if merge_key:
+        # Merge into specific key
+        keys = merge_key.split(".")
+        target = dst_data
+        for key in keys[:-1]:
+            target = target.setdefault(key, {})
+
+        last_key = keys[-1]
+        if isinstance(src_data, dict) and isinstance(target.get(last_key), dict):
+            # Deep merge for dicts
+            target[last_key] = {**target.get(last_key, {}), **src_data}
+        else:
+            target[last_key] = src_data
+    else:
+        # Merge at root level
+        if isinstance(src_data, dict) and isinstance(dst_data, dict):
+            dst_data = {**dst_data, **src_data}
+        else:
+            dst_data = src_data
+
+    with dst.open("w", encoding="utf-8") as fh:
+        json.dump(dst_data, fh, indent=2, ensure_ascii=False)
+        fh.write("\n")
+
+    write_log({"level": "INFO", "message": f"Merged JSON {src} -> {dst} (key: {merge_key or 'root'})"}, ctx)
+
+
 def op_run_command(op: Dict[str, Any], ctx: Dict[str, Any]) -> None:
     env = os.environ.copy()
     for key, value in op.get("env", {}).items():
@@ -287,28 +370,77 @@ def op_run_command(op: Dict[str, Any], ctx: Dict[str, Any]) -> None:
     command = op.get("command", "")
     if sys.platform == "win32" and command.strip() == "bash install.sh":
         command = "cmd /c install.bat"
-    result = subprocess.run(
+
+    # Stream output in real-time while capturing for logging
+    process = subprocess.Popen(
         command,
         shell=True,
         cwd=ctx["config_dir"],
         env=env,
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
     )
+
+    stdout_lines: List[str] = []
+    stderr_lines: List[str] = []
+
+    # Read stdout and stderr in real-time
+    if sys.platform == "win32":
+        # On Windows, use threads instead of selectors (pipes aren't selectable)
+        import threading
+
+        def read_output(pipe, lines, file=None):
+            for line in iter(pipe.readline, ''):
+                lines.append(line)
+                print(line, end="", flush=True, file=file)
+            pipe.close()
+
+        stdout_thread = threading.Thread(target=read_output, args=(process.stdout, stdout_lines))
+        stderr_thread = threading.Thread(target=read_output, args=(process.stderr, stderr_lines, sys.stderr))
+
+        stdout_thread.start()
+        stderr_thread.start()
+
+        stdout_thread.join()
+        stderr_thread.join()
+        process.wait()
+    else:
+        # On Unix, use selectors for more efficient I/O
+        import selectors
+        sel = selectors.DefaultSelector()
+        sel.register(process.stdout, selectors.EVENT_READ)  # type: ignore[arg-type]
+        sel.register(process.stderr, selectors.EVENT_READ)  # type: ignore[arg-type]
+
+        while process.poll() is None or sel.get_map():
+            for key, _ in sel.select(timeout=0.1):
+                line = key.fileobj.readline()  # type: ignore[union-attr]
+                if not line:
+                    sel.unregister(key.fileobj)
+                    continue
+                if key.fileobj == process.stdout:
+                    stdout_lines.append(line)
+                    print(line, end="", flush=True)
+                else:
+                    stderr_lines.append(line)
+                    print(line, end="", file=sys.stderr, flush=True)
+
+        sel.close()
+        process.wait()
 
     write_log(
         {
             "level": "INFO",
             "message": f"Command: {command}",
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-            "returncode": result.returncode,
+            "stdout": "".join(stdout_lines),
+            "stderr": "".join(stderr_lines),
+            "returncode": process.returncode,
         },
         ctx,
     )
 
-    if result.returncode != 0:
-        raise RuntimeError(f"Command failed with code {result.returncode}: {command}")
+    if process.returncode != 0:
+        raise RuntimeError(f"Command failed with code {process.returncode}: {command}")
 
 
 def write_log(entry: Dict[str, Any], ctx: Dict[str, Any]) -> None:
@@ -324,6 +456,17 @@ def write_log(entry: Dict[str, Any], ctx: Dict[str, Any]) -> None:
         for key in ("stdout", "stderr", "returncode"):
             if key in entry and entry[key] not in (None, ""):
                 fh.write(f"  {key}: {entry[key]}\n")
+
+    # Terminal output when verbose
+    if ctx.get("verbose"):
+        prefix = {"INFO": "ℹ️ ", "WARNING": "⚠️ ", "ERROR": "❌"}.get(level, "")
+        print(f"{prefix}[{level}] {message}")
+        if entry.get("stdout"):
+            print(f"  stdout: {entry['stdout'][:500]}")
+        if entry.get("stderr"):
+            print(f"  stderr: {entry['stderr'][:500]}", file=sys.stderr)
+        if entry.get("returncode") is not None:
+            print(f"  returncode: {entry['returncode']}")
 
 
 def write_status(results: List[Dict[str, Any]], ctx: Dict[str, Any]) -> None:
@@ -400,11 +543,17 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
 
     prepare_status_backup(ctx)
 
+    total = len(modules)
+    print(f"Installing {total} module(s) to {ctx['install_dir']}...")
+
     results: List[Dict[str, Any]] = []
-    for name, cfg in modules.items():
+    for idx, (name, cfg) in enumerate(modules.items(), 1):
+        print(f"[{idx}/{total}] Installing module: {name}...")
         try:
             results.append(execute_module(name, cfg, ctx))
-        except Exception:  # noqa: BLE001
+            print(f"  ✓ {name} installed successfully")
+        except Exception as exc:  # noqa: BLE001
+            print(f"  ✗ {name} failed: {exc}", file=sys.stderr)
             if not args.force:
                 rollback(ctx)
                 return 1
@@ -420,6 +569,19 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             break
 
     write_status(results, ctx)
+
+    # Summary
+    success = sum(1 for r in results if r.get("status") == "success")
+    failed = len(results) - success
+    if failed == 0:
+        print(f"\n✓ Installation complete: {success} module(s) installed")
+        print(f"  Log file: {ctx['log_file']}")
+    else:
+        print(f"\n⚠ Installation finished with errors: {success} success, {failed} failed")
+        print(f"  Check log file for details: {ctx['log_file']}")
+        if not args.force:
+            return 1
+
     return 0
 
 

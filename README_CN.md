@@ -1,24 +1,24 @@
 # Claude Code 多智能体工作流系统
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Claude Code](https://img.shields.io/badge/Claude-Code-blue)](https://claude.ai/code)
-[![Version](https://img.shields.io/badge/Version-5.0-green)](https://github.com/cexll/myclaude)
+[![Version](https://img.shields.io/badge/Version-5.2-green)](https://github.com/cexll/myclaude)
 
-> AI 驱动的开发自动化 - Claude Code + Codex 协作
+> AI 驱动的开发自动化 - 多后端执行架构 (Codex/Claude/Gemini)
 
-## 核心概念：Claude Code + Codex
+## 核心概念：多后端架构
 
-本系统采用**双智能体架构**：
+本系统采用**双智能体架构**与可插拔 AI 后端：
 
 | 角色 | 智能体 | 职责 |
 |------|-------|------|
 | **编排者** | Claude Code | 规划、上下文收集、验证、用户交互 |
-| **执行者** | Codex | 代码编辑、测试执行、文件操作 |
+| **执行者** | codeagent-wrapper | 代码编辑、测试执行（Codex/Claude/Gemini 后端）|
 
 **为什么分离？**
 - Claude Code 擅长理解上下文和编排复杂工作流
-- Codex 擅长专注的代码生成和执行
-- 两者结合效果优于单独使用
+- 专业后端（Codex 擅长代码、Claude 擅长推理、Gemini 擅长原型）专注执行
+- 通过 `--backend codex|claude|gemini` 匹配模型与任务
 
 ## 快速开始（windows上请在Powershell中执行）
 
@@ -152,14 +152,38 @@ python3 install.py --force
 
 ```
 ~/.claude/
-├── CLAUDE.md              # 核心指令和角色定义
-├── commands/              # 斜杠命令 (/dev, /code 等)
-├── agents/                # 智能体定义
+├── bin/
+│   └── codeagent-wrapper    # 主可执行文件
+├── CLAUDE.md                # 核心指令和角色定义
+├── commands/                # 斜杠命令 (/dev, /code 等)
+├── agents/                  # 智能体定义
 ├── skills/
 │   └── codex/
-│       └── SKILL.md       # Codex 集成技能
-└── installed_modules.json # 安装状态
+│       └── SKILL.md         # Codex 集成技能
+├── config.json              # 配置文件
+└── installed_modules.json   # 安装状态
 ```
+
+### 自定义安装目录
+
+默认情况下，myclaude 安装到 `~/.claude`。您可以使用 `INSTALL_DIR` 环境变量自定义安装目录：
+
+```bash
+# 安装到自定义目录
+INSTALL_DIR=/opt/myclaude bash install.sh
+
+# 相应更新您的 PATH
+export PATH="/opt/myclaude/bin:$PATH"
+```
+
+**目录结构：**
+- `$INSTALL_DIR/bin/` - codeagent-wrapper 可执行文件
+- `$INSTALL_DIR/skills/` - 技能定义
+- `$INSTALL_DIR/config.json` - 配置文件
+- `$INSTALL_DIR/commands/` - 斜杠命令定义
+- `$INSTALL_DIR/agents/` - 智能体定义
+
+**注意：** 使用自定义安装目录时，请确保将 `$INSTALL_DIR/bin` 添加到您的 `PATH` 环境变量中。
 
 ### 配置
 
@@ -201,7 +225,7 @@ python3 install.py --force
 
 ```bash
 # 通过技能调用 Codex
-codex-wrapper - <<'EOF'
+codeagent-wrapper - <<'EOF'
 在 @src/auth.ts 中实现 JWT 验证
 EOF
 ```
@@ -209,7 +233,7 @@ EOF
 ### 并行执行
 
 ```bash
-codex-wrapper --parallel <<'EOF'
+codeagent-wrapper --parallel <<'EOF'
 ---TASK---
 id: backend_api
 workdir: /project/backend
@@ -237,7 +261,7 @@ bash install.sh
 
 #### Windows 系统
 
-Windows 系统会将 `codex-wrapper.exe` 安装到 `%USERPROFILE%\bin`。
+Windows 系统会将 `codeagent-wrapper.exe` 安装到 `%USERPROFILE%\bin`。
 
 ```powershell
 # PowerShell（推荐）
@@ -258,8 +282,10 @@ $Env:PATH = "$HOME\bin;$Env:PATH"
 ```
 
 ```batch
-REM cmd.exe - 永久添加（当前用户）
-setx PATH "%USERPROFILE%\bin;%PATH%"
+REM cmd.exe - 永久添加（当前用户）（建议使用上面的 PowerShell 方法）
+REM 警告：此命令会展开 %PATH% 包含系统 PATH，导致重复
+REM 注意：使用 reg add 而非 setx 以避免 1024 字符截断限制
+reg add "HKCU\Environment" /v Path /t REG_EXPAND_SZ /d "%USERPROFILE%\bin;%PATH%" /f
 ```
 
 ---
@@ -283,11 +309,14 @@ setx PATH "%USERPROFILE%\bin;%PATH%"
 
 **Codex wrapper 未找到：**
 ```bash
-# 检查 PATH
-echo $PATH | grep -q "$HOME/bin" || echo 'export PATH="$HOME/bin:$PATH"' >> ~/.zshrc
+# 安装程序会自动添加 PATH，检查是否已添加
+if [[ ":$PATH:" != *":$HOME/.claude/bin:"* ]]; then
+    echo "PATH not configured. Reinstalling..."
+    bash install.sh
+fi
 
-# 重新安装
-bash install.sh
+# 或手动添加（幂等性命令）
+[[ ":$PATH:" != *":$HOME/.claude/bin:"* ]] && echo 'export PATH="$HOME/.claude/bin:$PATH"' >> ~/.zshrc
 ```
 
 **权限被拒绝：**
@@ -306,9 +335,108 @@ python3 install.py --module dev --force
 
 ---
 
+## 常见问题 (FAQ)
+
+### Q1: `codeagent-wrapper` 执行时报错 "Unknown event format"
+
+**问题描述：**
+执行 `codeagent-wrapper` 时出现错误：
+```
+Unknown event format: {"type":"turn.started"}
+Unknown event format: {"type":"assistant", ...}
+```
+
+**解决方案：**
+这是日志事件流的显示问题，不影响实际功能执行。预计在下个版本中修复。如需排查其他问题，可忽略此日志输出。
+
+**相关 Issue：** [#96](https://github.com/cexll/myclaude/issues/96)
+
+---
+
+### Q2: Gemini 无法读取 `.gitignore` 忽略的文件
+
+**问题描述：**
+使用 `codeagent-wrapper --backend gemini` 时，无法读取 `.claude/` 等被 `.gitignore` 忽略的目录中的文件。
+
+**解决方案：**
+- **方案一：** 在项目根目录的 `.gitignore` 中取消对 `.claude/` 的忽略
+- **方案二：** 确保需要读取的文件不在 `.gitignore` 忽略列表中
+
+**相关 Issue：** [#75](https://github.com/cexll/myclaude/issues/75)
+
+---
+
+### Q3: `/dev` 命令并行执行特别慢
+
+**问题描述：**
+使用 `/dev` 命令开发简单功能耗时过长（超过30分钟），无法了解任务执行状态。
+
+**解决方案：**
+1. **检查日志：** 查看 `C:\Users\User\AppData\Local\Temp\codeagent-wrapper-*.log` 分析瓶颈
+2. **调整后端：**
+   - 尝试使用 `gpt-5.1-codex-max` 等更快的模型
+   - 在 WSL 环境下运行速度可能更快
+3. **工作区选择：** 使用独立的代码仓库而非包含多个子项目的 monorepo
+
+**相关 Issue：** [#77](https://github.com/cexll/myclaude/issues/77)
+
+---
+
+### Q4: 新版 Go 实现的 Codex 权限不足
+
+**问题描述：**
+升级到新版 Go 实现的 Codex 后，出现权限不足的错误。
+
+**解决方案：**
+在 `~/.codex/config.yaml` 中添加以下配置（Windows: `c:\user\.codex\config.toml`）：
+```yaml
+model = "gpt-5.1-codex-max"
+model_reasoning_effort = "high"
+model_reasoning_summary = "detailed"
+approval_policy = "never"
+sandbox_mode = "workspace-write"
+disable_response_storage = true
+network_access = true
+```
+
+**关键配置说明：**
+- `approval_policy = "never"` - 移除审批限制
+- `sandbox_mode = "workspace-write"` - 允许工作区写入权限
+- `network_access = true` - 启用网络访问
+
+**相关 Issue：** [#31](https://github.com/cexll/myclaude/issues/31)
+
+---
+
+### Q5: 执行时遇到权限拒绝或沙箱限制
+
+**问题描述：**
+运行 codeagent-wrapper 时出现权限错误或沙箱限制。
+
+**解决方案：**
+设置以下环境变量：
+```bash
+export CODEX_BYPASS_SANDBOX=true
+export CODEAGENT_SKIP_PERMISSIONS=true
+```
+
+或添加到 shell 配置文件（`~/.zshrc` 或 `~/.bashrc`）：
+```bash
+echo 'export CODEX_BYPASS_SANDBOX=true' >> ~/.zshrc
+echo 'export CODEAGENT_SKIP_PERMISSIONS=true' >> ~/.zshrc
+```
+
+**注意：** 这些设置会绕过安全限制，请仅在可信环境中使用。
+
+---
+
+**仍有疑问？** 请访问 [GitHub Issues](https://github.com/cexll/myclaude/issues) 搜索或提交新问题。
+
+---
+
 ## 许可证
 
-MIT License - 查看 [LICENSE](LICENSE)
+AGPL-3.0 License - 查看 [LICENSE](LICENSE)
 
 ## 支持
 
