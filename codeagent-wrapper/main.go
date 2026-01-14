@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -32,8 +31,6 @@ const (
 	stdoutDrainTimeout     = 100 * time.Millisecond
 )
 
-var useASCIIMode = os.Getenv("CODEAGENT_ASCII_MODE") == "true"
-
 // Test hooks for dependency injection
 var (
 	stdinReader  io.Reader = os.Stdin
@@ -45,7 +42,6 @@ var (
 	buildCodexArgsFn   = buildCodexArgs
 	selectBackendFn    = selectBackend
 	commandContext     = exec.CommandContext
-	jsonMarshal        = json.Marshal
 	cleanupLogsFn      = cleanupOldLogs
 	signalNotifyFn     = signal.Notify
 	signalStopFn       = signal.Stop
@@ -434,12 +430,13 @@ func run() (exitCode int) {
 	logInfo(fmt.Sprintf("%s running...", cfg.Backend))
 
 	taskSpec := TaskSpec{
-		Task:      taskText,
-		WorkDir:   cfg.WorkDir,
-		Mode:      cfg.Mode,
-		SessionID: cfg.SessionID,
-		Model:     cfg.Model,
-		UseStdin:  useStdin,
+		Task:            taskText,
+		WorkDir:         cfg.WorkDir,
+		Mode:            cfg.Mode,
+		SessionID:       cfg.SessionID,
+		Model:           cfg.Model,
+		ReasoningEffort: cfg.ReasoningEffort,
+		UseStdin:        useStdin,
 	}
 
 	result := runTaskFn(taskSpec, false, cfg.Timeout)

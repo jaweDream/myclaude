@@ -17,6 +17,7 @@ import (
 )
 
 const postMessageTerminateDelay = 1 * time.Second
+const forceKillWaitTimeout = 5 * time.Second
 
 // commandRunner abstracts exec.Cmd for testability
 type commandRunner interface {
@@ -754,13 +755,18 @@ func buildCodexArgs(cfg *Config, targetArg string) []string {
 
 	args := []string{"e"}
 
-	if cfg.Yolo || envFlagEnabled("CODEX_BYPASS_SANDBOX") {
-		logWarn("YOLO mode or CODEX_BYPASS_SANDBOX=true: running without approval/sandbox protection")
+	// Default to bypass sandbox unless CODEX_BYPASS_SANDBOX=false
+	if cfg.Yolo || envFlagDefaultTrue("CODEX_BYPASS_SANDBOX") {
+		logWarn("YOLO mode or CODEX_BYPASS_SANDBOX enabled: running without approval/sandbox protection")
 		args = append(args, "--dangerously-bypass-approvals-and-sandbox")
 	}
 
 	if model := strings.TrimSpace(cfg.Model); model != "" {
 		args = append(args, "--model", model)
+	}
+
+	if reasoningEffort := strings.TrimSpace(cfg.ReasoningEffort); reasoningEffort != "" {
+		args = append(args, "--reasoning-effort", reasoningEffort)
 	}
 
 	args = append(args, "--skip-git-repo-check")
@@ -803,12 +809,13 @@ func runCodexTaskWithContext(parentCtx context.Context, taskSpec TaskSpec, backe
 	logger := injectedLogger
 
 	cfg := &Config{
-		Mode:      taskSpec.Mode,
-		Task:      taskSpec.Task,
-		SessionID: taskSpec.SessionID,
-		WorkDir:   taskSpec.WorkDir,
-		Model:     taskSpec.Model,
-		Backend:   defaultBackendName,
+		Mode:            taskSpec.Mode,
+		Task:            taskSpec.Task,
+		SessionID:       taskSpec.SessionID,
+		WorkDir:         taskSpec.WorkDir,
+		Model:           taskSpec.Model,
+		ReasoningEffort: taskSpec.ReasoningEffort,
+		Backend:         defaultBackendName,
 	}
 
 	commandName := codexCommand
@@ -843,6 +850,12 @@ func runCodexTaskWithContext(parentCtx context.Context, taskSpec TaskSpec, backe
 		if cfg.Mode != "resume" && strings.TrimSpace(cfg.Model) == "" && settings.Model != "" {
 			cfg.Model = settings.Model
 		}
+	}
+
+	// Load gemini env from ~/.gemini/.env if exists
+	var geminiEnv map[string]string
+	if cfg.Backend == "gemini" {
+		geminiEnv = loadGeminiEnv()
 	}
 
 	useStdin := taskSpec.UseStdin
@@ -946,6 +959,9 @@ func runCodexTaskWithContext(parentCtx context.Context, taskSpec TaskSpec, backe
 
 	if cfg.Backend == "claude" && len(claudeEnv) > 0 {
 		cmd.SetEnv(claudeEnv)
+	}
+	if cfg.Backend == "gemini" && len(geminiEnv) > 0 {
+		cmd.SetEnv(geminiEnv)
 	}
 
 	// For backends that don't support -C flag (claude, gemini), set working directory via cmd.Dir
@@ -1094,7 +1110,8 @@ func runCodexTaskWithContext(parentCtx context.Context, taskSpec TaskSpec, backe
 waitLoop:
 	for {
 		select {
-		case waitErr = <-waitCh:
+		case err := <-waitCh:
+			waitErr = err
 			break waitLoop
 		case <-ctx.Done():
 			ctxCancelled = true
@@ -1105,8 +1122,17 @@ waitLoop:
 					terminated = true
 				}
 			}
-			waitErr = <-waitCh
-			break waitLoop
+			for {
+				select {
+				case err := <-waitCh:
+					waitErr = err
+					break waitLoop
+				case <-time.After(forceKillWaitTimeout):
+					if proc := cmd.Process(); proc != nil {
+						_ = proc.Kill()
+					}
+				}
+			}
 		case <-messageTimerCh:
 			forcedAfterComplete = true
 			messageTimerCh = nil
@@ -1120,8 +1146,17 @@ waitLoop:
 			// Close pipes to unblock stream readers, then wait for process exit.
 			closeWithReason(stdout, "terminate")
 			closeWithReason(stderr, "terminate")
-			waitErr = <-waitCh
-			break waitLoop
+			for {
+				select {
+				case err := <-waitCh:
+					waitErr = err
+					break waitLoop
+				case <-time.After(forceKillWaitTimeout):
+					if proc := cmd.Process(); proc != nil {
+						_ = proc.Kill()
+					}
+				}
+			}
 		case <-completeSeen:
 			completeSeenObserved = true
 			if messageTimer != nil {
